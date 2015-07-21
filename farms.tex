@@ -1,0 +1,82 @@
+\documentclass{article}
+
+\usepackage{times}
+\usepackage{mathptmx}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\title{Farm Infection Implementation}
+\author{Andrew J.\ Dolgert}
+\date{5 July 2015}
+
+\begin{document}
+\maketitle
+
+Let's look at direct contact spread for \textsc{naadsm}~3.2,
+as specified in the \textsc{naadsm} Model Specification 1.2.1.
+Start with Sec.~A4.1 Direct contact spread, page A--10.
+
+In 1, first detection of the disease probably refers not to
+detection by a property owner but to first reporting of
+disease, as discussed later in the document. The multiplier, $k$,
+scales movement rate, so it must start at one and decrease to zero
+on some deterministic scale.
+
+In 2, we start with a possible source of infection. Every source
+creates the same number of shipments, or the same distribution
+of shipments, depending on whether shipment numbers are stochastic.
+There are $k$ shipments per day, or \emph{Poisson(k)} shipments per day.
+This seems to indicate that, even during an outbreak, a farm produces
+the same number of shipments, but we will see later that shipments
+are dropped in the algorithm, indicating that the intention is to
+model a farm which decreases its shipments under some circumstances.
+
+Only those units which are not quarantined or destroyed are
+put into a list. All reported units are automatically quarantined,
+so the only way a shipment goes to an already infected unit is if it wasn't
+reported. Of course there are no shipments if there are no destinations;
+that's a special case. Making a list of only those places that
+can receive goods means that more shipments than normal will be pushed to
+remaining susceptible farms.
+
+Sampling to find a destination farm does two interesting things.
+First it samples only from the list of possible farms.
+Second it chooses a distance, which is a radius from the farm,
+and selects among farms closest to that distance. If there were
+five farms at these radii , $(2, 2.9, 3, 3.1, 4)\:\mbox{km}$,
+then the farm $3\:\mbox{km}$ away is much less likely to receive
+a shipment. It's an accidentally biased kernel. If the distance
+kernel is $m(r)$ and the \emph{available\/} farms are labeled
+in order with distances $r_j$, then the probability of choosing
+a particular one is
+\begin{equation}
+  p_j=\int_{(r_{j-1}+r_j)/2}^{(r_{j+1}+r_j)/2} m(r)dr.\ref{eqn:farmprob}
+\end{equation}
+There is a mention
+of farms the ``same'' distance from each other. This sameness means
+they are within, according to the code, 0.01 apart. I'm guessing
+this is in kilometers. These same-distance farms complicate
+calculations because, given several same-distance farms,
+ones forbidden by zone are excluded, which means ones allowed
+by zone, within a certain distance, are included.
+
+At this point, shipments forbidden by zone movement are dropped.
+Up until now, the number of shipments was affected only by the 
+movement multiplier, $k$. For zone movement, shipments will be dropped
+unless there is a same-distance farm not excluded by zone rules,
+in which case the $p_j$ for the same-distance farms are increased.
+The percentage dropped is a reduction to the overall number
+of shipments to leave. This percentage comes from the likelihood
+of choosing a zone-forbidden farm from the list of otherwise-available
+farms.
+Forbidding transfer by zone reduces the overall shipments per day
+by a factor determined from the probability of having arrived
+at any zone-forbidden farms, calculated with Eq.~\ref{eqn:farmprob}.
+This rescales the multiplier by $1-\sum_n p_n$ where $n$ runs over
+farms forbidden by zone rules. The new probability for choosing
+a non-forbidden farm is $p_j/\sum_j p_j$ which excludes the forbidden
+ones.
+
+\end{document}
+
