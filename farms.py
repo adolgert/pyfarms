@@ -3,11 +3,7 @@ import itertools
 #from enum import Enum
 import numpy as np
 import scipy.spatial.distance as distance
-import distributions
-import llcp
-import sample
-import runner
-import point_process
+import gspn
 
 logger=logging.getLogger(__file__)
 
@@ -121,13 +117,13 @@ class DiseaseModel(object):
 
     def write_transitions(self, writer):
         t=DiseaseABTransition(self.place, DiseaseState.latent, DiseaseState.subclinical,
-            lambda now: distributions.ExponentialDistribution(0.5, now))
+            lambda now: gspn.ExponentialDistribution(0.5, now))
         writer.add_transition(t)
         t=DiseaseABTransition(self.place, DiseaseState.subclinical, DiseaseState.clinical,
-            lambda now: distributions.ExponentialDistribution(0.5, now))
+            lambda now: gspn.ExponentialDistribution(0.5, now))
         writer.add_transition(t)
         t=DiseaseABTransition(self.place, DiseaseState.clinical, DiseaseState.recovered,
-            lambda now: distributions.ExponentialDistribution(0.5, now))
+            lambda now: gspn.ExponentialDistribution(0.5, now))
         writer.add_transition(t)
 
     def infectious_intensity(self):
@@ -162,7 +158,7 @@ class QuarantineTransition(object):
     def enabled(self, now):
         if ((self.detectable.intensity(now) is not None)
                 and (self.model.place.state is False)):
-            return (True, distributions.ExponentialDistribution(0.1, now))
+            return (True, gspn.ExponentialDistribution(0.1, now))
         else:
             return (None, None)
     def fire(self, now, rng):
@@ -263,7 +259,7 @@ class InfectTransition(object):
         intensity=self.intensity.intensity(now)
         if intensity is not None and self.action.enabled(now):
             rate=0.5*intensity
-            return (True, distributions.ExponentialDistribution(rate, now))
+            return (True, gspn.ExponentialDistribution(rate, now))
         else:
             return (False, None)
 
@@ -317,7 +313,7 @@ class RestrictionTransition(object):
         if detectable and unrestricted:
             if self.te is None:
                 self.te=now
-            return (True, distributions.ExponentialDistribution(1, self.te))
+            return (True, gspn.ExponentialDistribution(1, self.te))
         else:
             return (False, None)
 
@@ -381,7 +377,7 @@ class DirectModel(object):
 
 class Landscape(object):
     def __init__(self):
-        self.farm_locations=point_process.thomas_point_process_2D(
+        self.farm_locations=gspn.thomas_point_process_2D(
             5, 0.1, 5, (0, 1, 0, 1))
         individual_cnt=self.farm_locations.shape[0]
         self.distances=distance.squareform(distance.pdist(self.farm_locations,
@@ -393,7 +389,7 @@ class Landscape(object):
 class Scenario(object): pass
 
 def Build():
-    net=llcp.LLCP()
+    net=gspn.LLCP()
     landscape=Landscape()
     farms=landscape.farms
 
@@ -438,8 +434,8 @@ def test_farm():
     net, scenario=Build()
     initial_idx=0
     scenario.farms[initial_idx].disease.infection_partial().fire(0, rng)
-    sampler=sample.NextReaction(net, rng)
-    run=runner.RunnerFSM(sampler, observer)
+    sampler=gspn.NextReaction(net, rng)
+    run=gspn.RunnerFSM(sampler, observer)
     run.init()
     run.run()
 
