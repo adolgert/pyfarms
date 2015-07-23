@@ -28,4 +28,6 @@ setup(name="pyfarms",
     zip_safe=False,
     entry_points={
       "console_scripts" : ["farmspread=pyfarms.command_line:main"]
-    })
+    },
+    test_suite="nose.collector",
+    tests_require=["nose"])
