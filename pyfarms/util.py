@@ -29,7 +29,9 @@ def effectively_readable(path):
 
     return st.st_mode & stat.S_IROTH != 0
 
-def check_filename(filename):
+def check_filename(filename, argument):
+    if filename is None or filename=="":
+        raise RuntimeError("No filename given for {0}".format(argument))
     if not os.path.exists(filename):
         basepath=filename
         prevpath=basepath
@@ -40,8 +42,8 @@ def check_filename(filename):
             raise RuntimeError("The path to {0} doesn't exist so {1} "+
                 "cannot be read.".format(basepath, filename))
         else:
-            raise RuntimeError("The file {0} doesn't exist in that directory"
-                ).format(filename)
+            raise RuntimeError("The file {0} doesn't exist in that "+
+                "directory".format(filename))
     if not os.path.isfile(filename):
         raise RuntimeError("The path {0} isn't a file.".format(filename))
     if not effectively_readable(filename):
