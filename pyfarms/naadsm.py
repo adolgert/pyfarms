@@ -4,8 +4,11 @@ import xml.parsers.expat.errors
 import logging
 from default_parser import DefaultArgumentParser
 import util
+import farms
 
 logger=logging.getLogger(__file__)
+
+
 
 def load_naadsm_scenario(scenario_filename, herd_filename):
     ns={"naadsm" : "http://www.naadsm.org/schema",
@@ -26,6 +29,8 @@ def load_naadsm_scenario(scenario_filename, herd_filename):
             herd_filename, err.position,
             xml.parsers.expat.errors.messages[err.code]))
     
+    landscape=farms.Landscape()
+    landscape.from_naadsm_file(hxml, ns)
 
 
 if __name__ == "__main__":

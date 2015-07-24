@@ -1,5 +1,6 @@
 import os
 import os.path
+import numpy as np
 
 
 def effectively_readable(path):
@@ -49,3 +50,15 @@ def check_filename(filename, argument):
     if not effectively_readable(filename):
         raise RuntimeError("The file {0} exists, "+
             "but this process cannot read it").format(filename)
+
+
+_degrees_to_radians=np.pi/180
+_radians_km=180*60*1.852/np.pi
+
+def distancekm(latlon1, latlon2):
+    """Distance computed on a spherical earth.
+    Taken from http://williams.best.vwh.net/avform.htm."""
+    ll1=latlon1*_degrees_to_radians
+    ll2=latlon2*_degrees_to_radians
+    return _radians_km*(2*np.arcsin(np.sqrt(np.power(np.sin((ll1[0]-ll2[0])/2),2)+
+        np.cos(ll1[0])*np.cos(ll2[0])*np.power(np.sin((ll1[1]-ll2[1])/2), 2))))

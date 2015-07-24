@@ -4,6 +4,7 @@ import itertools
 import numpy as np
 import scipy.spatial.distance as distance
 import gspn
+import util
 
 logger=logging.getLogger(__file__)
 
@@ -111,6 +112,27 @@ class DiseaseModel(object):
     def __init__(self, farm):
         self.farm=farm
         self.place=DiseasePlace(self)
+
+    def from_naadsm_xml(self, root, ns):
+        self.stages=list()
+        for stage in root:
+            stage_id=stage.tag
+            stage_root=root.find(stage, ns)
+            pdf_root=stage_root.find("probability-density-function")
+            stage_name=pdf_root.attrib["name"]
+            dist=None
+            for child in pdf_root:
+                if child.tag=="gamma":
+                    alpha=float(root.find("alpha", ns).text)
+                    beta=float(root.find("beta", ns).text)
+                    dist=("gamma", alpha, beta)
+                elif child.tag=="point":
+                    days=int(child.text)
+                    if days>0:
+                        dist=("point", days)
+            if dist is not None:
+                self.stages.append([stage_id, stage_name, dist])
+
 
     def write_places(self, writer):
         writer.add_place(self.place)
@@ -386,7 +408,45 @@ class Landscape(object):
         for add_idx in range(individual_cnt):
             self.farms.append(Farm(add_idx))
 
-class Scenario(object): pass
+    def from_naadsm_file(self, root, ns):
+        self.farms=list()
+        for unit in root.findall("herd", ns):
+            unit_name=unit.find("id").text
+            f=Farm(unit_name)
+            unit_type=unit.find("production-type").text
+            f.production_type=unit_type
+            unit_size=int(unit.find("size").text)
+            f.size=unit_size
+            location=unit.find("location")
+            lat=float(location.find("latitude").text)
+            lon=float(location.find("longitude").text)
+            f.latlon=np.array([lat, lon])
+            status=unit.find("status").text
+            f.status=status
+            self.farms.append(f)
+        self.farm_locations=np.array([x.latlon for x in self.farms])
+        self.distances=distance.squareform(
+            distance.pdist(self.farm_locations, util.distancekm))
+        logger.debug("found {0} farms".format(len(self.farms)))
+
+
+class Scenario(object):
+    def __init__(self):
+        pass
+
+    def from_naadsm_file(self, root, ns):
+        models=root.find("models")
+        self.disease_by_type=dict()
+        self.disease_by_id=dict()
+        for disease_model in models.findall("disease-model", ns):
+            production_type=disease_model.attrib["production-type"]
+            production_id=disease_model.attrib["production-type-id"]
+            dm=DiseaseModel()
+            dm.from_naadsm_file(disease_model, ns)
+            self.disease_by_type[production_type]=dm
+            self.disease_by_id[production_id]=dm
+
+
 
 def Build():
     net=gspn.LLCP()
