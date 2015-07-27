@@ -105,33 +105,41 @@ class SendIntensity(object):
     def intensity(self, now):
         return None
 
+
+def read_naadsm_pdf(pdf_owner, ns):
+    pdf_root=pdf_owner.find("probability-density-function", ns)
+    stage_name=pdf_root.attrib["name"]
+    dist=None
+    for child in pdf_root:
+        if child.tag=="gamma":
+            alpha=float(child.find("alpha", ns).text)
+            beta=float(child.find("beta", ns).text)
+            dist=(stage_name, gspn.ExponentialDistribution, alpha, beta)
+        elif child.tag=="point":
+            days=int(child.text)
+            if days>0:
+                dist=(stage_name, gspn.ExponentialDistribution, days)
+        else:
+            logger.error("Unknown distribution {0}".format(child.tag))
+    return dist
+
+
 class DiseaseModel(object):
     """
     This is a scenario model for disease state within a farm.
     """
-    def __init__(self, farm):
-        self.farm=farm
+    def __init__(self):
+        self.farm=None
         self.place=DiseasePlace(self)
 
-    def from_naadsm_xml(self, root, ns):
+    def from_naadsm_file(self, root, ns):
         self.stages=list()
         for stage in root:
             stage_id=stage.tag
-            stage_root=root.find(stage, ns)
-            pdf_root=stage_root.find("probability-density-function")
-            stage_name=pdf_root.attrib["name"]
-            dist=None
-            for child in pdf_root:
-                if child.tag=="gamma":
-                    alpha=float(root.find("alpha", ns).text)
-                    beta=float(root.find("beta", ns).text)
-                    dist=("gamma", alpha, beta)
-                elif child.tag=="point":
-                    days=int(child.text)
-                    if days>0:
-                        dist=("point", days)
+            logger.debug("DiseaseModel state {0}".format(stage_id))
+            dist=read_naadsm_pdf(stage, ns)
             if dist is not None:
-                self.stages.append([stage_id, stage_name, dist])
+                self.stages.append([stage_id, dist])
 
 
     def write_places(self, writer):
@@ -200,7 +208,7 @@ class QuarantineIntensity(object):
 class QuarantineModel(object):
     def __init__(self, farm):
         self.farm=farm
-        self.place=QuarantinePlace()
+        self.place=QuarantinePlace()        
 
     def write_places(self, writer):
         writer.add_place(self.place)
@@ -211,6 +219,26 @@ class QuarantineModel(object):
     def quarantine(self):
         return QuarantineIntensity(self)
 
+
+class NoQuarantineIntensity(object):
+    def __init__(self, model):
+        self.model=model
+    def depends(self):
+        return []
+    def affected(self):
+        return []
+    def intensity(self, now):
+        return False
+
+class NoQuarantineModel(object):
+    def __init__(self, farm):
+        self.farm=farm
+    def write_places(self, writer):
+        pass
+    def write_transitions(self, writer):
+        pass
+    def quarantine(self):
+        return NoQuarantineIntensity(self)
 
 
 ###############################################################
@@ -230,7 +258,8 @@ class Farm(object):
     def __init__(self, name, size=1000):
         self.name=name
         self.size=size
-        self.disease=DiseaseModel(self)
+        self.disease=DiseaseModel()
+        self.disease.farm=self
         self.quarantine=QuarantineModel(self)
 
     def write_places(self, writer):
@@ -296,6 +325,16 @@ class InfectNeighborModel(object):
     def __init__(self, farma, farmb):
         self.farma=farma
         self.farmb=farmb
+
+    def from_naadsm_file(self, root, ns):
+        # This is for the exponenital model.
+        self.p=float(root.find("prob-spread-1km", ns).text)
+        wind=root.find("wind-direction-start", ns)
+        self.wind_angle_begin=float(wind.find("value").text)
+        wind=root.find("wind-direction-end", ns)
+        self.wind_angle_end=float(wind.find("value").text)
+        delay=root.find("delay", ns)
+        self.pdf=read_naadsm_pdf(delay, ns)
 
     def write_places(self, writer):
         pass
@@ -445,6 +484,15 @@ class Scenario(object):
             dm.from_naadsm_file(disease_model, ns)
             self.disease_by_type[production_type]=dm
             self.disease_by_id[production_id]=dm
+        self.quarantine=root.find("quarantine-model", ns)
+        self.spread_models=dict()
+        for neighbor_model in models.findall(
+                "airborne-spread-exponential-model", ns):
+            from_production=neighbor_model.attrib["from-production-type"]
+            to_production=neighbor_model.attrib["to-production-type"]
+            im=InfectNeighborModel("a", "b")
+            im.from_naadsm_file(neighbor_model, ns)
+            self.spread_models[(from_production, to_production)]=im
 
 
 

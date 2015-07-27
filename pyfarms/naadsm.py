@@ -9,6 +9,27 @@ import farms
 logger=logging.getLogger(__file__)
 
 
+class Monitors(object):
+    def __init__(self):
+        self.infection=False
+        self.exposure=False
+
+    def from_naadsm_file(self, root, ns):
+        models=root.find("models", ns)
+        for monitor in ["infection", "exposure", "detection",
+                "trace", "destruction", "destruction-list", "vaccination",
+                "vaccination-list", "nonexistent"]:
+            search_string="{0}-monitor".format(monitor)
+            im=models.find(search_string, ns)
+            if im is not None:
+                setattr(self, monitor, True)
+            else:
+                setattr(self, monitor, False)
+            logging.debug("Monitors {0} {1}".format(search_string,
+                getattr(self, monitor)))
+
+        outputs=root.find("output", ns)
+        # Don't know how to read outputs yet. Only entry says "all".
 
 def load_naadsm_scenario(scenario_filename, herd_filename):
     ns={"naadsm" : "http://www.naadsm.org/schema",
@@ -31,6 +52,12 @@ def load_naadsm_scenario(scenario_filename, herd_filename):
     
     landscape=farms.Landscape()
     landscape.from_naadsm_file(hxml, ns)
+
+    scenario=farms.Scenario()
+    scenario.from_naadsm_file(sxml, ns)
+
+    monitors=Monitors()
+    monitors.from_naadsm_file(sxml, ns)
 
 
 if __name__ == "__main__":
