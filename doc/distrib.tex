@@ -179,19 +179,34 @@ Translating this into equations, we get
 
 \section{Verification of Distribution Implementations}
 
-Where theoretical bounds are known, they will be used to verify
+These distributions support three functions, sample, integrate
+hazard, and the inverse of integrating hazard. We have to test
+these for various conditions of distribution parameters,
+enabling times, and current times.
+
+\begin{enumerate}
+
+\item Where theoretical bounds are known, they will be used to verify
 implementations. For instance, the expected mean of an 
 exponential distribution is the inverse of its hazard rate,
 with suitable ninety-fifth percentile bounds.
 
-In the absence of these measures, for some distributions,
-the Kolmogorov-Smirnov test will compare samples with those
-from a known implementation. Each distribution has to be tested
-for sampling two different ways, once with simple sampling,
-and once with the kind of sampling used for Anderson's method,
-which relies on hazard integrals and inverse hazard integrals.
+\item The integral and its inverse should be inverses.
 
+\item While these distributions support odd methods, they
+can be compared with samples from known distributions.
+The first option is to sample something known from the standard
+library of special functions and then use a Kolmogorov-Smirnov
+test for comparison.
 
+\item There is a second way to sample these distributions using
+the inverse hazard integral and hazard integral. This, too,
+can be compared using Kolmogorov-Smirnov.
+
+\item Plots help. We could make plots and compare with copies
+of known examples.
+
+\end{enumerate}
 
 %%%%%%%%%%%%%%%%%%% LOG-LOGISTIC %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

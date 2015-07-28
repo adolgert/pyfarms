@@ -1,6 +1,7 @@
-
+import pyfarms.naadsm
 
 
 def main():
-    print("This is the main")
+    pyfarms.naadsm.load_naadsm()
+
     

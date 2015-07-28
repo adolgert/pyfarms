@@ -30,7 +30,16 @@ def effectively_readable(path):
 
     return st.st_mode & stat.S_IROTH != 0
 
+
+
 def check_filename(filename, argument):
+    """
+    Given a command line argument that should be a readable file,
+    ensure it is a readable file and give informative messages if not.
+    If it's not a file but a directory, tell me. If the path is wrong,
+    tell me which part of th epath is wrong. If the file exists but
+    I don't have permission to read it, tell me that. Gosh!
+    """
     if filename is None or filename=="":
         raise RuntimeError("No filename given for {0}".format(argument))
     if not os.path.exists(filename):
@@ -40,16 +49,17 @@ def check_filename(filename, argument):
             prevpath=basepath
             basepath=os.path.dirname(basepath)
         if prevpath!=filename:
-            raise RuntimeError("The path to {0} doesn't exist so {1} "+
-                "cannot be read.".format(basepath, filename))
+            raise RuntimeError(("The path to {0} doesn't exist so {1} "+
+                "cannot be read.").format(basepath, filename))
         else:
-            raise RuntimeError("The file {0} doesn't exist in that "+
-                "directory".format(filename))
+            raise RuntimeError(("The file {0} doesn't exist in that "+
+                "directory").format(filename))
     if not os.path.isfile(filename):
         raise RuntimeError("The path {0} isn't a file.".format(filename))
     if not effectively_readable(filename):
-        raise RuntimeError("The file {0} exists, "+
-            "but this process cannot read it").format(filename)
+        raise RuntimeError(("The file {0} exists, "+
+            "but this process cannot read it").format(filename))
+
 
 
 _degrees_to_radians=np.pi/180

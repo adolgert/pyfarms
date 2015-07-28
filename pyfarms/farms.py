@@ -4,7 +4,7 @@ import itertools
 import numpy as np
 import scipy.spatial.distance as distance
 import gspn
-import util
+import pyfarms.util as util
 
 logger=logging.getLogger(__file__)
 

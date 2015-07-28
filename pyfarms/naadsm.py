@@ -2,9 +2,9 @@ import os.path
 import xml.etree.ElementTree as etree
 import xml.parsers.expat.errors
 import logging
-from default_parser import DefaultArgumentParser
-import util
-import farms
+from pyfarms.default_parser import DefaultArgumentParser
+import pyfarms.util as util
+import pyfarms.farms as farms
 
 logger=logging.getLogger(__file__)
 
@@ -60,7 +60,7 @@ def load_naadsm_scenario(scenario_filename, herd_filename):
     monitors.from_naadsm_file(sxml, ns)
 
 
-if __name__ == "__main__":
+def load_naadsm():
     parser=DefaultArgumentParser(description="Load NAADSM XML Files")
     parser.add_function("load", "Load XML files")
     parser.add_argument("--scenario", dest="scenario_file", type=str,
@@ -74,4 +74,6 @@ if __name__ == "__main__":
         util.check_filename(args.herd_file, "herd file")
         load_naadsm_scenario(args.scenario_file, args.herd_file)
 
+if __name__ == "__main__":
+    load_naadsm
 
