@@ -1,7 +1,9 @@
 import logging
 import itertools
+import copy
 #from enum import Enum
 import numpy as np
+import numbers
 import scipy.spatial.distance as distance
 import gspn
 import pyfarms.util as util
@@ -25,7 +27,7 @@ class DiseasePlace(object):
         self.state=DiseaseState.susceptible
 
 
-class DiseaseABTransition:
+class DiseaseABTransition(object):
     def __init__(self, farm_place, a, b, distribution):
         self.place=farm_place
         self.a=a
@@ -133,11 +135,19 @@ class DiseaseModel(object):
         self.place=DiseasePlace(self)
         self.transitions=list()
 
+    def clone(self, farm):
+        dm=copy.copy(self)
+        dm.farm=farm
+        dm.place=DiseasePlace(dm)
+        return dm
+
     def add_transition(self, name, start_state, end_state,
             distribution, *distargs):
-        dist=[name, distribution]
-        dist.append(distargs)
+        dist=[name, distribution, distargs]
         self.transitions.append([name, start_state, end_state, dist])
+
+    def initial_infection(self):
+        self.place.state=DiseaseState.latent
 
     def from_naadsm_file(self, root, ns):
         name_to_state={"latent-period" : DiseaseState.latent,
@@ -170,7 +180,9 @@ class DiseaseModel(object):
     def write_transitions(self, writer):
         for t in self.transitions:
             dist=t[3][1]
-            args=t[3][2:]
+            args=t[3][2][0]
+            logger.debug("write transitions dist {0} args {1}".format(
+                type(dist), args))
             trans=DiseaseABTransition(self.place, t[1], t[2],
                 lambda now : dist(*args, te=now))
             writer.add_transition(trans)
@@ -225,9 +237,15 @@ class QuarantineIntensity(object):
         return self.model.place.state
 
 class QuarantineModel(object):
-    def __init__(self, farm):
-        self.farm=farm
+    def __init__(self):
+        self.farm=None
         self.place=QuarantinePlace()        
+
+    def clone(self, farm):
+        qm=copy.copy(self)
+        qm.farm=farm
+        qm.place=QuarantinePlace()
+        return qm
 
     def write_places(self, writer):
         writer.add_place(self.place)
@@ -250,8 +268,12 @@ class NoQuarantineIntensity(object):
         return False
 
 class NoQuarantineModel(object):
-    def __init__(self, farm):
-        self.farm=farm
+    def __init__(self):
+        self.farm=None
+    def clone(self, farm):
+        qm=copy.copy(self)
+        qm.farm=farm
+        return qm
     def write_places(self, writer):
         pass
     def write_transitions(self, writer):
@@ -274,12 +296,19 @@ class SendIntensity(object):
         return self.quarantine.intensity(now)==False
 
 class Farm(object):
-    def __init__(self, name, size=1000):
-        self.name=name
-        self.size=size
+    def __init__(self):
+        self.name=None
+        self.size=None
         self.disease=DiseaseModel()
-        self.disease.farm=self
-        self.quarantine=QuarantineModel(self)
+        self.quarantine=NoQuarantineModel()
+
+    def clone(self, name, size):
+        fm=copy.copy(self)
+        fm.name=name
+        fm.size=size
+        fm.disease=self.disease.clone(fm)
+        fm.quarantine=self.quarantine.clone(fm)
+        return fm
 
     def write_places(self, writer):
         self.disease.write_places(writer)
@@ -341,9 +370,17 @@ class InfectNeighborModel(object):
     """
     This is a scenario model for infection of one farm by another.
     """
-    def __init__(self, farma, farmb):
-        self.farma=farma
-        self.farmb=farmb
+    def __init__(self):
+        self.farma=None
+        self.farmb=None
+        self.distance=None
+
+    def clone(self, farma, farmb, distance):
+        inm=copy.copy(self)
+        inm.farma=farma
+        inm.farmb=farmb
+        inm.distance=distance
+        return inm
 
     def from_naadsm_file(self, root, ns):
         # This is for the exponenital model.
@@ -455,6 +492,8 @@ class DirectModel(object):
         pass
 
 
+class Premises(object): pass
+
 class Landscape(object):
     """
     The landscape is the world upon which the rules act.
@@ -462,35 +501,48 @@ class Landscape(object):
     each farm. It has data about the world.
     """
     def __init__(self):
-        self.farm_locations=gspn.thomas_point_process_2D(
-            5, 0.1, 5, (0, 1, 0, 1))
-        individual_cnt=self.farm_locations.shape[0]
-        self.distances=distance.squareform(distance.pdist(self.farm_locations,
-            "euclidean"))
-        self.farms=list()
-        for add_idx in range(individual_cnt):
-            self.farms.append(Farm(add_idx))
+        self.premises=list()
+        self.farm_locations=np.zeros(0)
+        self.distances=np.zeros((0,0))
+        self.production_types=set()
+        # self.farm_locations=gspn.thomas_point_process_2D(
+        #     5, 0.1, 5, (0, 1, 0, 1))
+        # individual_cnt=self.farm_locations.shape[0]
+        # self.distances=distance.squareform(distance.pdist(self.farm_locations,
+        #     "euclidean"))
+        # self.premises=list()
+        # for add_idx in range(individual_cnt):
+        #     self.premises.append(Farm(add_idx))
+
+    def add_premises(self, name, production_type, size, location):
+        f=Premises()
+        f.name=name
+        f.production_type=production_type
+        self.production_types.add(production_type)
+        f.size=size
+        assert(len(location)==2)
+        assert(isinstance(location[0], numbers.Real))
+        assert(isinstance(location[1], numbers.Real))
+        f.latlon=location
+        self.premises.append(f)
 
     def from_naadsm_file(self, root, ns):
-        self.farms=list()
         for unit in root.findall("herd", ns):
             unit_name=unit.find("id").text
-            f=Farm(unit_name)
             unit_type=unit.find("production-type").text
-            f.production_type=unit_type
             unit_size=int(unit.find("size").text)
-            f.size=unit_size
             location=unit.find("location")
             lat=float(location.find("latitude").text)
             lon=float(location.find("longitude").text)
-            f.latlon=np.array([lat, lon])
-            status=unit.find("status").text
-            f.status=status
-            self.farms.append(f)
-        self.farm_locations=np.array([x.latlon for x in self.farms])
+            latlon=np.array([lat, lon])
+            self.add_premises(unit_name, unit_type, unit_size, latlon)
+        self._build()
+
+    def _build(self):
+        self.farm_locations=np.array([x.latlon for x in self.premises])
         self.distances=distance.squareform(
             distance.pdist(self.farm_locations, util.distancekm))
-        logger.debug("found {0} farms".format(len(self.farms)))
+        logger.debug("found {0} premises".format(len(self.premises)))
 
 
 class Scenario(object):
@@ -498,9 +550,45 @@ class Scenario(object):
     The scenario is the set of rules for how the simulation world works.
     """
     def __init__(self):
-        pass
+        self.models_loaded=False
+
+    def build_from_landscape(self, landscape):
+        """
+        Given a landscape, make instances from the models.
+        """
+        assert(self.models_loaded)
+        self.farms=list()
+        for p in landscape.premises:
+            f=self.farm_models[p.production_type].clone(p.name, p.size)
+            self.farms.append(f)
+
+        self.airborne=list()
+        for aidx, bidx in itertools.combinations(range(len(self.farms)), 2):
+            a=self.farms[aidx]
+            b=self.farms[bidx]
+            from_type=landscape.premises[aidx].production_type
+            to_type=landscape.premises[bidx].production_type
+            dx=landscape.distances[aidx, bidx]
+            air_model=self.spread_models[(from_type, to_type)].clone(a, b, dx)
+            self.airborne.append(air_model)
+
+ 
+    def write_gspn(self, net):
+        """
+        Given instances, write places and transitions into a net.
+        """
+        for f in self.farms:
+            f.write_places(net)
+            f.write_transitions(net)
+        for airborne_instance in self.airborne:
+            airborne_instance.write_places(net)
+            airborne_instance.write_transitions(net)
+
 
     def from_naadsm_file(self, root, ns):
+        """
+        Read input specifications in order to produce a closet of models.
+        """
         models=root.find("models")
         self.disease_by_type=dict()
         self.disease_by_id=dict()
@@ -511,40 +599,35 @@ class Scenario(object):
             dm.from_naadsm_file(disease_model, ns)
             self.disease_by_type[production_type]=dm
             self.disease_by_id[production_id]=dm
-        self.quarantine=root.find("quarantine-model", ns)
+        if root.find("quarantine-model", ns) is not None:
+            self.quarantine=QuarantineModel()
+        else:
+            self.quarantine=NoQuarantineModel()
         self.spread_models=dict()
         for neighbor_model in models.findall(
                 "airborne-spread-exponential-model", ns):
             from_production=neighbor_model.attrib["from-production-type"]
             to_production=neighbor_model.attrib["to-production-type"]
-            im=InfectNeighborModel("a", "b")
+            im=InfectNeighborModel()
             im.from_naadsm_file(neighbor_model, ns)
             self.spread_models[(from_production, to_production)]=im
 
+        self.farm_models=dict() # production_type => farm model
+        for production_type in self.disease_by_type.keys():
+            f=Farm()
+            f.disease=self.disease_by_type[production_type]
+            f.quarantine=self.quarantine
+            self.farm_models[production_type]=f
+
+        self.models_loaded=True
 
 
-def Build():
+
+def Build(scenario, landscape):
     net=gspn.LLCP()
-    landscape=Landscape()
-    farms=landscape.farms
-
-    for f in farms:
-        f.write_places(net)
-        f.write_transitions(net)
-
-    for a, b in itertools.combinations(farms, 2):
-        infect=InfectNeighborModel(a, b)
-        infect.write_places(net)
-        infect.write_transitions(net)
-
-    restrictions=MovementRestrictionsModel(landscape)
-    restrictions.write_places(net)
-    restrictions.write_transitions(net)
-
-    scenario=Scenario()
-    scenario.landscape=landscape
-    scenario.farms=farms
-    return net, scenario
+    scenario.build_from_landscape(landscape)
+    scenario.write_gspn(net)
+    return net
 
 
 ########################################

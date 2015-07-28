@@ -2,9 +2,11 @@ import os.path
 import xml.etree.ElementTree as etree
 import xml.parsers.expat.errors
 import logging
+import numpy as np
 from pyfarms.default_parser import DefaultArgumentParser
 import pyfarms.util as util
 import pyfarms.farms as farms
+import gspn
 
 logger=logging.getLogger(__file__)
 
@@ -31,6 +33,43 @@ class Monitors(object):
         outputs=root.find("output", ns)
         # Don't know how to read outputs yet. Only entry says "all".
 
+
+class InitialConditionsNAADSM(object):
+    def __init__(self):
+        self.infections=dict()
+
+    def from_naadsm_file(self, root, ns):
+        """
+        Pass in a Herd file.
+        """
+        for unit in root.findall("herd", ns):
+            unit_name=unit.find("id").text
+            status=unit.find("status").text
+            if status!="Susceptible":
+                self.infections[unit_name]=status
+
+    def apply(self, scenario):
+        for f in scenario.farms:
+            if f.name in self.infections.keys():
+                f.disease.initial_infection()
+
+
+# This is the part that runs the SIR
+def observer(transition, when):
+    if isinstance(transition, farms.DiseaseABTransition):
+        print("AB {0} {1} {2} {3}".format(transition.place.disease_model.farm.name,
+            transition.a, transition.b, when))
+    elif isinstance(transition, farms.InfectTransition):
+        print("Infect {0} {1} {2}".format(transition.intensity.place.disease_model.farm.name,
+            transition.action.farm.farm.name,
+            when))
+    elif isinstance(transition, farms.QuarantineTransition):
+        print("Quarantine {0}".format(when))
+    else:
+        print("Unknown transition {0}".format(transition))
+    return True
+
+
 def load_naadsm_scenario(scenario_filename, herd_filename):
     ns={"naadsm" : "http://www.naadsm.org/schema",
         "xsd" : "http://www.w3.org/2001/XMLSchema",
@@ -56,8 +95,21 @@ def load_naadsm_scenario(scenario_filename, herd_filename):
     scenario=farms.Scenario()
     scenario.from_naadsm_file(sxml, ns)
 
+    net=farms.Build(scenario, landscape)
+
+    initial=InitialConditionsNAADSM()
+    initial.from_naadsm_file(hxml, ns)
+    initial.apply(scenario)
+
     monitors=Monitors()
     monitors.from_naadsm_file(sxml, ns)
+
+    rng=np.random.RandomState()
+    rng.seed(33333)
+    sampler=gspn.NextReaction(net, rng)
+    run=gspn.RunnerFSM(sampler, observer)
+    run.init()
+    run.run()
 
 
 def load_naadsm():
