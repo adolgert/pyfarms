@@ -177,7 +177,7 @@ class TestGamma(TestCase):
             system[i]=v
         system_dist=distributions.EmpiricalDistribution(system)
         ks_fit=emp_dist.compare_empirical(system_dist)
-        logger.debug("Exponential test_samples ks {0}".format(ks_fit))
+        logger.debug("Gamma test_samples ks {0}".format(ks_fit))
         self.assertTrue(ks_fit<1.63)
 
 
@@ -204,6 +204,90 @@ class TestGamma(TestCase):
             system[i]=v
         system_dist=distributions.EmpiricalDistribution(system)
         ks_fit=emp_dist.compare_empirical(system_dist)
-        logger.debug("Exponential test_samples ks {0}".format(ks_fit))
+        logger.debug("Gamma test_samples ks {0}".format(ks_fit))
+        self.assertTrue(ks_fit<1.63)
+
+
+
+
+class TestUniform(TestCase):
+    def test_theoretical(self):
+        """
+        Test theoretical Uniform.
+        """
+        a=1.0
+        b=2.0
+        te=0.5
+        now=2.3
+        tol=0.0001
+        rng=np.random.RandomState()
+        ed=distributions.UniformDistribution(a, b, te)
+        cnt=10000
+        res=np.zeros(cnt)
+        for i in range(cnt):
+            res[i]=ed.sample(now, rng)
+        avg=np.average(res)
+        logger.debug("Uniform avg {0} theory {1}".format(avg, 0.5*(b+te+now)))
+        self.assertTrue(0.01>abs(avg-0.5*(b+te+now)))
+
+
+    def test_integrals(self):
+        """
+        Are the Uniform hazard integral and its inverse really inverses?
+        """
+        a=1.0
+        b=2.0
+        te=0.5
+        now=2.3
+        tol=0.0001
+        rng=np.random.RandomState()
+        ed=distributions.UniformDistribution(a, b, te)
+        for t in np.linspace(now, te+b-0.00001, num=5):
+            xa=ed.hazard_integral(now, t)
+            t_ish=ed.implicit_hazard_integral(xa, now)
+            logger.debug("Uniform integrals {0} ish {1} xa {2}".format(
+                t, t_ish, xa))
+            self.assertTrue(tol>abs(t-t_ish))
+
+    def test_samples(self):
+        """
+        Sample from the Uniform scipy distribution and from ours. Compare.
+        """
+        cnt=10000
+        rng=np.random.RandomState()
+        samples=np.zeros(cnt)
+        a=1.0
+        b=2.0
+        te=0.5
+        now=2.3
+        exp_dist=distributions.UniformDistribution(a, b, te)
+        for i in range(cnt):
+            samples[i]=exp_dist.sample(now, rng)
+        emp_dist=distributions.EmpiricalDistribution(samples)
+        system=scipy.stats.uniform.rvs(loc=now, scale=b+te-now, size=cnt)
+        system_dist=distributions.EmpiricalDistribution(system)
+        ks_fit=emp_dist.compare_empirical(system_dist)
+        logger.debug("Uniform test_samples ks {0}".format(ks_fit))
+        self.assertTrue(ks_fit<1.63)
+
+
+    def test_anderson_samples(self):
+        """
+        Sample from the Uniform scipy distribution and from ours using Anderson's
+        method.
+        """
+        cnt=10000
+        rng=np.random.RandomState()
+        a=1.0
+        b=2.0
+        te=0.5
+        now=2.3
+        exp_dist=distributions.UniformDistribution(a, b, te)
+        samples=distributions.anderson_sample_tester(exp_dist, now, cnt, rng)
+        emp_dist=distributions.EmpiricalDistribution(samples)
+        system=scipy.stats.uniform.rvs(loc=now, scale=b+te-now, size=cnt)
+        system_dist=distributions.EmpiricalDistribution(system)
+        ks_fit=emp_dist.compare_empirical(system_dist)
+        logger.debug("Uniform test_samples ks {0}".format(ks_fit))
         self.assertTrue(ks_fit<1.63)
 

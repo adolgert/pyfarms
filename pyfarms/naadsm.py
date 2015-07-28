@@ -75,5 +75,5 @@ def load_naadsm():
         load_naadsm_scenario(args.scenario_file, args.herd_file)
 
 if __name__ == "__main__":
-    load_naadsm
+    load_naadsm()
 

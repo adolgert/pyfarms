@@ -6,7 +6,7 @@ import scipy.spatial.distance as distance
 import gspn
 import pyfarms.util as util
 
-logger=logging.getLogger(__file__)
+logger=logging.getLogger("farms")
 
 
 ##############################################################
@@ -114,11 +114,11 @@ def read_naadsm_pdf(pdf_owner, ns):
         if child.tag=="gamma":
             alpha=float(child.find("alpha", ns).text)
             beta=float(child.find("beta", ns).text)
-            dist=(stage_name, gspn.ExponentialDistribution, alpha, beta)
+            dist=(stage_name, gspn.GammaDistribution, alpha, beta)
         elif child.tag=="point":
             days=int(child.text)
             if days>0:
-                dist=(stage_name, gspn.ExponentialDistribution, days)
+                dist=(stage_name, gspn.UniformDistribution, days-0.5, days+0.5)
         else:
             logger.error("Unknown distribution {0}".format(child.tag))
     return dist
@@ -131,30 +131,49 @@ class DiseaseModel(object):
     def __init__(self):
         self.farm=None
         self.place=DiseasePlace(self)
+        self.transitions=list()
+
+    def add_transition(self, name, start_state, end_state,
+            distribution, *distargs):
+        dist=[name, distribution]
+        dist.append(distargs)
+        self.transitions.append([name, start_state, end_state, dist])
 
     def from_naadsm_file(self, root, ns):
-        self.stages=list()
+        name_to_state={"latent-period" : DiseaseState.latent,
+            "infectious-subclinical-period" : DiseaseState.subclinical,
+            "infectious-clinical-period" : DiseaseState.clinical,
+            "immunity-period" : DiseaseState.recovered}
+        transitions=list()
         for stage in root:
             stage_id=stage.tag
             logger.debug("DiseaseModel state {0}".format(stage_id))
             dist=read_naadsm_pdf(stage, ns)
             if dist is not None:
-                self.stages.append([stage_id, dist])
-
+                transitions.append([stage_id, dist])
+        self.transitions=list()
+        for tidx in range(len(transitions)):
+            t=transitions[tidx]
+            start_state=name_to_state[t[0]]
+            if tidx+1<len(transitions):
+                end_state=name_to_state[transitions[tidx+1][0]]
+            else:
+                end_state=DiseaseState.susceptible
+            logger.debug("DM {0} {1}:{2}".format(t[0], start_state,
+                end_state))
+            self.add_transition(t[0], start_state, end_state, t[1][1],
+                t[1][2:])
 
     def write_places(self, writer):
         writer.add_place(self.place)
 
     def write_transitions(self, writer):
-        t=DiseaseABTransition(self.place, DiseaseState.latent, DiseaseState.subclinical,
-            lambda now: gspn.ExponentialDistribution(0.5, now))
-        writer.add_transition(t)
-        t=DiseaseABTransition(self.place, DiseaseState.subclinical, DiseaseState.clinical,
-            lambda now: gspn.ExponentialDistribution(0.5, now))
-        writer.add_transition(t)
-        t=DiseaseABTransition(self.place, DiseaseState.clinical, DiseaseState.recovered,
-            lambda now: gspn.ExponentialDistribution(0.5, now))
-        writer.add_transition(t)
+        for t in self.transitions:
+            dist=t[3][1]
+            args=t[3][2:]
+            trans=DiseaseABTransition(self.place, t[1], t[2],
+                lambda now : dist(*args, te=now))
+            writer.add_transition(trans)
 
     def infectious_intensity(self):
         return InfectiousIntensity(self)
@@ -437,6 +456,11 @@ class DirectModel(object):
 
 
 class Landscape(object):
+    """
+    The landscape is the world upon which the rules act.
+    It knows where farms are, what types of production are at
+    each farm. It has data about the world.
+    """
     def __init__(self):
         self.farm_locations=gspn.thomas_point_process_2D(
             5, 0.1, 5, (0, 1, 0, 1))
@@ -470,6 +494,9 @@ class Landscape(object):
 
 
 class Scenario(object):
+    """
+    The scenario is the set of rules for how the simulation world works.
+    """
     def __init__(self):
         pass
 
