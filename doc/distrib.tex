@@ -136,9 +136,9 @@ Sometimes the inverse \textsc{cdf} is unavailable, in favor if the
 inverse survival, in which case
 \begin{eqnarray}
 F(t-t_e)&=&U(1-F(t_0-t_e))+F(t_0-t_e) \\
-G(t-t_e)&=&1-U(1-F(t_0-t_e))+F(t_0-t_e) \\
-t-t_e &=& G^{-1}\left[1-U(1-F(t_0-t_e))+F(t_0-t_e)\right] \\
-t &=& t_e+G^{-1}\left[1-U(1-F(t_0-t_e))+F(t_0-t_e)\right]
+G(t-t_e)&=&1-U(1-F(t_0-t_e))-F(t_0-t_e) \\
+t-t_e &=& G^{-1}\left[1-U(1-F(t_0-t_e))-F(t_0-t_e)\right] \\
+t &=& t_e+G^{-1}\left[1-U(1-F(t_0-t_e))-F(t_0-t_e)\right]
 \end{eqnarray}
 The equation then becomes
 \begin{lstlisting}
@@ -349,6 +349,10 @@ So here is our inverse hazard integral.
   tp=te + gamma_p_inv(a, quad)/b
 \end{lstlisting}
 
+
+
+%%%%%%%%%%%%%%% UNIFORM %%%%%%%%%%%%%%%%%%%
+
 \section{Uniform Distribution}
 Maybe this one will be easier.
 This distribution has two parameters, a start time
@@ -373,6 +377,15 @@ be necessary to check for overflow near $t_b$, and it
 would help to keep the two logs separated, instead of
 in the fraction.
 
+The integrated hazard for a uniform distribution is unbounded.
+It would be fine to create a cutoff close-enough to the
+end time, $t_b$. Using $t_{1e}=t_1-t_e$,
+\begin{eqnarray}
+  \int_{t_1-t_e}^{t_2-t_e}\lambda(s)ds&=&\ln\left[
+    \frac{(t_b-t_a)-(t_{1e}-t_a)}{(t_b-t_a)-(t_{2e}-t_a)}\right]
+\end{eqnarray}
+
+
 What about the inverse of the hazard integral?
 $F^{-1}(x)=t_a+(t_b-t_a)x$ Therefore, for $t_a\le t_0-t_e$,
 \begin{equation}
@@ -382,6 +395,11 @@ and for $t_0-t_e< t_a$,
 \begin{equation}
   t'=t_e+t_a+(t_b-t_a)\left[1-e^{-x}\right]
 \end{equation}
+Multiplying through, this becomes
+\begin{equation}
+  t'=t_e+t_b-e^{-x}(b-t_0-t_e)
+\end{equation}
+which is more clearly less than $t_e+t_b$.
 
 
 
