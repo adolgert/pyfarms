@@ -147,6 +147,7 @@ class DiseaseModel(object):
         self.transitions.append([name, start_state, end_state, dist])
 
     def initial_infection(self):
+        logger.debug("Initial infection at {0}".format(self.farm.name))
         self.place.state=DiseaseState.latent
 
     def from_naadsm_file(self, root, ns):
@@ -169,8 +170,8 @@ class DiseaseModel(object):
                 end_state=name_to_state[transitions[tidx+1][0]]
             else:
                 end_state=DiseaseState.susceptible
-            logger.debug("DM {0} {1}:{2}".format(t[0], start_state,
-                end_state))
+            logger.debug("DM {0} {1}:{2} {3}".format(t[0], start_state,
+                end_state, t[1][2:]))
             self.add_transition(t[0], start_state, end_state, t[1][1],
                 t[1][2:])
 
@@ -181,10 +182,10 @@ class DiseaseModel(object):
         for t in self.transitions:
             dist=t[3][1]
             args=t[3][2][0]
-            logger.debug("write transitions dist {0} args {1}".format(
-                type(dist), args))
+            def make_dist(dist, args):
+                return lambda enable : dist(*args, te=enable)
             trans=DiseaseABTransition(self.place, t[1], t[2],
-                lambda now : dist(*args, te=now))
+                make_dist(dist, args))
             writer.add_transition(trans)
 
     def infectious_intensity(self):
@@ -572,6 +573,19 @@ class Scenario(object):
             air_model=self.spread_models[(from_type, to_type)].clone(a, b, dx)
             self.airborne.append(air_model)
 
+    def clone(self):
+        """
+        A scenario that has been built from the landscape can be cloned.
+        This will clone all of its state.
+        """
+        sc=copy.copy(self)
+        sc.farms=list()
+        for f in self.farms:
+            sc.farms.append(f.clone(f.name, f.size))
+        sc.airborne=list()
+        for a in self.airborne:
+            sc.airborne.append(a.clone(a.farma, a.farmb, a.distance))
+        return sc
  
     def write_gspn(self, net):
         """

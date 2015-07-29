@@ -176,6 +176,33 @@ Translating this into equations, we get
   inv_hazard_int(x, t0, te)=te+invlogccdf(lp)
 \end{lstlisting}
 
+In order to calculate the likelihood of a trajectory of
+a larger system of transitions, it is possible to ask,
+at each time step, what is the likelihood of a particular
+transition firing next at a particular time.
+This value is the probability the whole system
+survives to that future time,
+\begin{equation}
+  \prod_i G_i(t_0, t_f, t_e)
+\end{equation}
+multiplied by the likelihood
+that transition will fire at that time, $f(t_0, t_f, t_e)=F'(t_0, t_f, t_e)$.
+The log-likelihood of survival is then
+\begin{equation}
+  \sum_i \ln G_i(t_0, t_f, t_e)=-\sum_i \int_{t_0}^{t_f}\lambda(s,t_e)ds.
+\end{equation}
+This can be found from integrated hazards, already calculated.
+The likelihood for the firing transition includes the density,
+rescaled to account for not yet having fired,
+\begin{equation}
+  f(t_0, t_f, t_e)=f(t,t_e)/G(t_0, t_e).
+\end{equation}
+Its log will be
+\begin{equation}
+  \ln f(t_0, t_f, t_e)=\ln f(t,t_e) - \ln G(t_0, t_e)=
+  \ln f(t,t_e)+\int_{t_e}^{t_0}\lambda(s, t_e)ds.
+\end{equation}
+
 
 \section{Verification of Distribution Implementations}
 

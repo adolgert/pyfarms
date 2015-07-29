@@ -67,7 +67,7 @@ def observer(transition, when):
         print("Quarantine {0}".format(when))
     else:
         print("Unknown transition {0}".format(transition))
-    return True
+    return when<365
 
 
 def load_naadsm_scenario(scenario_filename, herd_filename):
