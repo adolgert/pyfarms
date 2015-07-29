@@ -1,5 +1,6 @@
 import logging
 import itertools
+import collections
 import copy
 #from enum import Enum
 import numpy as np
@@ -343,9 +344,10 @@ class InfectTransition(object):
     This transition brings together pieces from different models
     into a full transition.
     """
-    def __init__(self, intensity, action):
+    def __init__(self, intensity, action, rate):
         self.intensity=intensity
         self.action=action
+        self.rate=rate
 
     def depends(self):
         deps=self.intensity.depends()
@@ -370,11 +372,20 @@ class InfectTransition(object):
 class InfectNeighborModel(object):
     """
     This is a scenario model for infection of one farm by another.
+    Converts distance into a hazard rate.
+    Model for probability is exponential P=exp(-r d) where we are told
+    0.5 = exp(-r 1) so r=-ln(0.5)
+    Given probability for infection in a day, the hazard rate l is:
+    P=1 - exp(- l t) so l=-ln(1-P)
+    where t is 1 day.
     """
     def __init__(self):
         self.farma=None
         self.farmb=None
         self.distance=None
+
+    def set_special_factor(self, special):
+        self.special=special
 
     def clone(self, farma, farmb, distance):
         inm=copy.copy(self)
@@ -392,16 +403,41 @@ class InfectNeighborModel(object):
         self.wind_angle_end=float(wind.find("value").text)
         delay=root.find("delay", ns)
         self.pdf=read_naadsm_pdf(delay, ns)
+        self.hazard=lambda dx: np.power(self.p, dx)
 
     def write_places(self, writer):
         pass
 
     def write_transitions(self, writer):
+        base=self.hazard(self.distance)
+        rate=base*self.special[self.farma.size]*self.special[self.farmb.size]
         writer.add_transition(InfectTransition(
-            self.farma.infectious_intensity(), self.farmb.infection_partial()))
-        writer.add_transition(InfectTransition(
-            self.farmb.infectious_intensity(), self.farma.infection_partial()))
+            self.farma.infectious_intensity(), self.farmb.infection_partial(),
+            rate))
 
+    def herd_factor(self, premises):
+        """
+        This herd factor is used for airborne exponential models,
+        and maybe more. It's some way to account for size of herds
+        affecting spread. It's a kind of rescaling.
+        """
+        special_factor=2 # Comes from NAADSM
+        histogram=collections.defaultdict(int)
+        for p in premises:
+            histogram[p.size]+=1
+        total=sum(histogram.values())
+        running=0
+        cumulants=list()
+        for size, count in sorted(histogram.items()):
+            running+=count
+            cumulants.append([size, special_factor*running/total])
+        factor_dict=dict()
+        previous=0
+        for size, val in cumulants:
+            factor_dict[size]=0.5*(previous+val)
+            previous=val
+        logger.debug("Creating herd special factor {0}".format(factor_dict))
+        return factor_dict
 
 ##############################################################
 # Movement restrictions
@@ -563,15 +599,21 @@ class Scenario(object):
             f=self.farm_models[p.production_type].clone(p.name, p.size)
             self.farms.append(f)
 
-        self.airborne=list()
-        for aidx, bidx in itertools.combinations(range(len(self.farms)), 2):
-            a=self.farms[aidx]
-            b=self.farms[bidx]
-            from_type=landscape.premises[aidx].production_type
-            to_type=landscape.premises[bidx].production_type
-            dx=landscape.distances[aidx, bidx]
-            air_model=self.spread_models[(from_type, to_type)].clone(a, b, dx)
-            self.airborne.append(air_model)
+        #### airborne
+        if len(self.spread_models)>0:
+            a_spread_model=next (iter (self.spread_models.values()))
+            special_factor=a_spread_model.herd_factor(landscape.premises)
+            for v in self.spread_models.values():
+                v.set_special_factor(special_factor)
+            self.airborne=list()
+            for aidx, bidx in itertools.permutations(range(len(self.farms)), 2):
+                a=self.farms[aidx]
+                b=self.farms[bidx]
+                from_type=landscape.premises[aidx].production_type
+                to_type=landscape.premises[bidx].production_type
+                dx=landscape.distances[aidx, bidx]
+                air_model=self.spread_models[(from_type, to_type)].clone(a, b, dx)
+                self.airborne.append(air_model)
 
     def clone(self):
         """
@@ -617,6 +659,7 @@ class Scenario(object):
             self.quarantine=QuarantineModel()
         else:
             self.quarantine=NoQuarantineModel()
+
         self.spread_models=dict()
         for neighbor_model in models.findall(
                 "airborne-spread-exponential-model", ns):
