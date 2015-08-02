@@ -343,6 +343,7 @@ class QuarantinePlace(object):
 
 class QuarantineTransition(object):
     def __init__(self, model):
+        logger.debug("Quarantine transition create")
         self.model=model
         self.farm=(model.farm,)
         self.detectable=model.farm.detection.is_detected()
@@ -361,7 +362,7 @@ class QuarantineTransition(object):
         Quarantine happens "a day after" reporting.
         """
         if ((self.detectable.intensity(now) is not None)
-                and (self.model.place.state is False)):
+                and (not self.model.place.state)):
             if self.te is not None:
                 now=self.te
             return (True, gspn.UniformDistribution(0.5, 1.5, now))
