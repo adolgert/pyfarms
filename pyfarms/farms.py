@@ -201,12 +201,18 @@ class DiseaseModel(object):
             writer.add_transition(trans)
 
     def infectious_intensity(self):
+        """
+        Are these animals shedding virus?
+        """
         return InfectiousIntensity(self)
 
     def infection_partial(self):
         return InfectPartial(self)
 
     def detectable_intensity(self):
+        """
+        Would a vet be able to see signs of disease?
+        """
         return DetectionIntensity(self)
 
 ###############################################################
@@ -404,6 +410,9 @@ class QuarantineModel(object):
         writer.add_transition(QuarantineTransition(self))
 
     def quarantine(self):
+        """
+        Is quarantine in effect?
+        """
         return QuarantineIntensity(self)
 
 
@@ -437,13 +446,22 @@ class NoQuarantineModel(object):
 ###############################################################
 class SendIntensity(object):
     def __init__(self, farm):
-        self.farm=farm
-        self.quarantine=farm.quarantine()
+        self.farm=(farm,)
+        self.quarantine=farm.quarantine
 
     def depends(self):
         return self.quarantine.depends()
     def intensity(self, now):
-        return self.quarantine.intensity(now)==False
+        return not self.quarantine.intensity(now)
+
+class ReceiveIntensity(object):
+    def __init__(self, farm):
+        self.farm=(farm,)
+        self.quarantine=farm.quarantine
+    def depends(self):
+        return self.quarantine.depends()
+    def intensity(self, now):
+        return not self.quarantine.intensity(now)
 
 class Farm(object):
     def __init__(self):
@@ -475,6 +493,9 @@ class Farm(object):
         return self.disease.infectious_intensity()
 
     def infection_partial(self):
+        """
+        A partial transition to infect a susceptible unit.
+        """
         return self.disease.infection_partial()
 
     def detectable_intensity(self):
@@ -485,9 +506,15 @@ class Farm(object):
         return self.disease.detectable_intensity()
 
     def send_shipments(self):
+        """
+        Would this farm be allowed to send animals?
+        """
         return SendIntensity(self)
 
     def receive_shipments(self):
+        """
+        Would this farm be allowed to receive animals?
+        """
         return ReceiveIntensity(self)
 
 
@@ -646,8 +673,100 @@ class InfectNeighborModel(object):
         return factor_dict
 
 ##############################################################
+# Indirect Contact
+##############################################################
+
+class IndirectTransition(object):
+    def __init__(self, farms, distances, source_idx):
+        self.farms=farms
+        # Distances is an array matrix. Take the row and delete
+        # the self-to-self distance.
+        self.distances=np.delete(distances[source_idx,:], source_idx)
+        self.source_idx=source_idx
+        self.source_intensity=self.farms[source_idx].infectious_intensity()
+        self.sending=self.farms[source_idx].send_shipments()
+        self.infectable=list()
+        self.receiving=list()
+        for farm_idx in range(len(self.farms)):
+            if farm_idx!=self.source_idx:
+                # Is this the right question? Want that they aren't quarantined.
+                self.infectable.append(self.farms[farm_idx].infection_partial())
+                self.receiving.append(self.farms[farm_idx].receive_shipments())
+
+    def depends(self):
+        d=self.source_intensity.depends()
+        d.extend(self.sending.depends())
+        for infectable in self.infectable:
+            d.extend(infectable.depends())
+        for receive in self.receiving:
+            d.extend(receive.depends())
+
+    def affected(self):
+        return self.infectable[self.affected_idx].affected()
+
+    def enabled(self, now):
+        can_send=self.sending.intensity()
+        am_hot=self.source_intensity.intensity() is not None
+        if (not can_send) or (not am_hot):
+            return (False, None)
+
+        self.current_recipients=list()
+        current_distances=list()
+        for tidx in range(len(self.infectable)):
+            uninfected=self.infectable[tidx].intensity()
+            receiving=self.receiving[tidx].intensity()
+            self.current_recipients.append(tidx)
+            current_distances=self.distances[tidx]
+        if len(self.current_recipients) is 0:
+            return (False, None)
+        sort_idx=np.argsort(distances)
+        prob_basked=np.zeros(len(current_distances), dtype=np.double)
+        inner=0.0
+        for didx in range(0, len(distances)-1):
+            ptidx=sort_idx[didx]
+            outer=0.5*(distances[ptidx]+distances[sort_idx[didx+1]])
+            prob_basked[ptidx]=outer-inner
+            inner=outer
+        self.prob_basket/=np.sum(prob_basket)
+        self.overall_rate=2.0
+        return (True, gspn.ExponentialDistribution(self.overall_rate, now))
+
+    def fire(self, now, rng):
+        self.affected_idx=np.random.choice(self.current_recipients,
+            p=self.prob_basket)
+        self.infectable.fire(now, rng)
+
+
+class IndirectModel(object):
+    """
+    The NAADSM model for indirect contact, which means trucks without animals.
+    There is a different model for each source production type.
+    """
+    def __init__(self, source_production_type, destination_rates):
+        self.source_production_type=source_production_type
+        self.destination_rates=destination_rates
+
+    def clone(self, distances, farm_models, farm_idx):
+        im=copy.copy(self)
+        im.farms=farm_models
+        im.distances=distances
+        im.source_idx=farm_idx
+        return im
+
+    def write_places(self, writer):
+        pass
+
+    def write_transitions(self, writer):
+        t=IndirectTransition(self.farms, self.distances, self.source_idx)
+        writer.add_transition(t)
+
+
+
+
+##############################################################
 # Movement restrictions
 ##############################################################
+
 class RestrictionPlace(object):
     def __init__(self):
         self.restricted_date=None
