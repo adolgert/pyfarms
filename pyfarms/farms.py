@@ -93,19 +93,22 @@ class InfectPartial:
     """
     This is the action-part of a transition. It isn't a whole transition.
     """
-    def __init__(self, farm):
-        self.farm=farm
+    def __init__(self, model):
+        self.farm=(model.farm,)
+        self.model=model
     def depends(self):
-        return [self.farm.place]
+        return [self.model.place]
     def affected(self):
-        return [self.farm.place]
+        return [self.model.place]
     def enabled(self, now):
-        if self.farm.place.state in (DiseaseState.susceptible,):
+        if self.model.place.state in (DiseaseState.susceptible,):
             return True
         else:
             return False
     def fire(self, now, rng):
-        self.farm.place.state=DiseaseState.latent
+        assert(self.model.place.state==DiseaseState.susceptible)
+        self.model.place.state=DiseaseState.latent
+        logger.debug("InfectPartial fire {0}".format(self.farm[0].name))
 
 
 class SendIntensity(object):
@@ -409,7 +412,7 @@ class QuarantineModel(object):
     def write_transitions(self, writer):
         writer.add_transition(QuarantineTransition(self))
 
-    def quarantine(self):
+    def quarantine_intensity(self):
         """
         Is quarantine in effect?
         """
@@ -437,7 +440,7 @@ class NoQuarantineModel(object):
         pass
     def write_transitions(self, writer):
         pass
-    def quarantine(self):
+    def quarantine_intensity(self):
         return NoQuarantineIntensity(self)
 
 
@@ -447,7 +450,7 @@ class NoQuarantineModel(object):
 class SendIntensity(object):
     def __init__(self, farm):
         self.farm=(farm,)
-        self.quarantine=farm.quarantine
+        self.quarantine=farm.quarantine.quarantine_intensity()
 
     def depends(self):
         return self.quarantine.depends()
@@ -457,7 +460,7 @@ class SendIntensity(object):
 class ReceiveIntensity(object):
     def __init__(self, farm):
         self.farm=(farm,)
-        self.quarantine=farm.quarantine
+        self.quarantine=farm.quarantine.quarantine_intensity()
     def depends(self):
         return self.quarantine.depends()
     def intensity(self, now):
@@ -678,6 +681,7 @@ class InfectNeighborModel(object):
 
 class IndirectTransition(object):
     def __init__(self, farms, distances, source_idx):
+        self.farm=(farms[source_idx],)
         self.farms=farms
         # Distances is an array matrix. Take the row and delete
         # the self-to-self distance.
@@ -692,6 +696,11 @@ class IndirectTransition(object):
                 # Is this the right question? Want that they aren't quarantined.
                 self.infectable.append(self.farms[farm_idx].infection_partial())
                 self.receiving.append(self.farms[farm_idx].receive_shipments())
+        self.affected_idx=source_idx
+
+    def __str__(self):
+        return "Indirect({0},{1})".format(self.farms[self.source_idx].name,
+            self.farms[self.affected_idx].name)
 
     def depends(self):
         d=self.source_intensity.depends()
@@ -700,41 +709,54 @@ class IndirectTransition(object):
             d.extend(infectable.depends())
         for receive in self.receiving:
             d.extend(receive.depends())
+        return d
 
     def affected(self):
         return self.infectable[self.affected_idx].affected()
 
     def enabled(self, now):
-        can_send=self.sending.intensity()
-        am_hot=self.source_intensity.intensity() is not None
+        can_send=self.sending.intensity(now)
+        am_hot=self.source_intensity.intensity(now) is not None
         if (not can_send) or (not am_hot):
             return (False, None)
 
         self.current_recipients=list()
         current_distances=list()
         for tidx in range(len(self.infectable)):
-            uninfected=self.infectable[tidx].intensity()
-            receiving=self.receiving[tidx].intensity()
-            self.current_recipients.append(tidx)
-            current_distances=self.distances[tidx]
+            uninfected=self.infectable[tidx].enabled(now)
+            receiving=self.receiving[tidx].intensity(now)
+            if uninfected and receiving:
+                self.current_recipients.append(tidx)
+                current_distances.append(self.distances[tidx])
+        current_distances=np.array(current_distances)
         if len(self.current_recipients) is 0:
             return (False, None)
-        sort_idx=np.argsort(distances)
-        prob_basked=np.zeros(len(current_distances), dtype=np.double)
+        sort_idx=np.argsort(current_distances)
+        prob_basket=np.zeros(len(current_distances), dtype=np.double)
+        uniform_max=160.0
         inner=0.0
-        for didx in range(0, len(distances)-1):
+        for didx in range(0, len(current_distances)-1):
             ptidx=sort_idx[didx]
-            outer=0.5*(distances[ptidx]+distances[sort_idx[didx+1]])
-            prob_basked[ptidx]=outer-inner
-            inner=outer
-        self.prob_basket/=np.sum(prob_basket)
-        self.overall_rate=2.0
+            if inner<uniform_max:
+                outer=0.5*(current_distances[ptidx]+current_distances[sort_idx[didx+1]])
+                outer=min(outer, uniform_max)
+                prob_basket[ptidx]=outer-inner
+                inner=outer
+        total_prob=np.sum(prob_basket)
+        if not total_prob>0.0:
+            return (False, None)
+        self.prob_basket=prob_basket/total_prob
+        self.overall_rate=1.5
         return (True, gspn.ExponentialDistribution(self.overall_rate, now))
 
     def fire(self, now, rng):
-        self.affected_idx=np.random.choice(self.current_recipients,
-            p=self.prob_basket)
-        self.infectable.fire(now, rng)
+        try:
+            self.affected_idx=np.random.choice(self.current_recipients,
+                p=self.prob_basket)
+        except ValueError as ve:
+            logger.error("Cannot choose from probabilities: {0}".format(self.prob_basket))
+        logger.debug("Indirect fire {0} {1}".format(self.source_idx, self.affected_idx))
+        self.infectable[self.affected_idx].fire(now, rng)
 
 
 class IndirectModel(object):
@@ -942,6 +964,17 @@ class Scenario(object):
                 air_model=self.spread_models[(from_type, to_type)].clone(a, b, dx)
                 self.airborne.append(air_model)
 
+        ### Indirect Contact
+        self.indirect=list()
+        if len(self.indirect_models)>0:
+            for ind_idx in range(len(self.farms)):
+                f=self.farms[ind_idx]
+                p=landscape.premises[ind_idx]
+                im=self.indirect_models[p.production_type].clone(
+                    landscape.distances, self.farms, ind_idx)
+                self.indirect.append(im)
+
+
     def clone(self):
         """
         A scenario that has been built from the landscape can be cloned.
@@ -967,9 +1000,13 @@ class Scenario(object):
             f.write_places(net)
             f.write_transitions(net)
 
-        for airborne_instance in self.airborne:
-            airborne_instance.write_places(net)
-            airborne_instance.write_transitions(net)
+        # for airborne_instance in self.airborne:
+        #     airborne_instance.write_places(net)
+        #     airborne_instance.write_transitions(net)
+
+        for indirect_instance in self.indirect:
+            indirect_instance.write_places(net)
+            indirect_instance.write_transitions(net)
 
 
     def from_naadsm_file(self, root, ns):
@@ -1012,6 +1049,11 @@ class Scenario(object):
             im=InfectNeighborModel()
             im.from_naadsm_file(neighbor_model, ns)
             self.spread_models[(from_production, to_production)]=im
+
+        self.indirect_ab_models=dict()
+        self.indirect_models=dict()
+        for production_type in self.disease_by_type.keys():
+            self.indirect_models[production_type]=IndirectModel(production_type, None)
 
         self.farm_models=dict() # production_type => farm model
         for production_type in self.disease_by_type.keys():

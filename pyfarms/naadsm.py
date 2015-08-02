@@ -64,6 +64,8 @@ def observer(transition, when):
         who=whom
     if tname=="DiseaseABTransition":
         print("{0} {1}".format(transition, when))
+    elif tname=="IndirectTransition":
+        print("{0} {1}".format(transition, when))
     else:
         print("{0} {1} {2} {3}".format(tname, who, whom, when))
     return when<365
