@@ -361,7 +361,8 @@ class QuarantineTransition(object):
         """
         Quarantine happens "a day after" reporting.
         """
-        if ((self.detectable.intensity(now) is not None)
+        # If it has been reported and not quarantined.
+        if (self.detectable.intensity(now)
                 and (not self.model.place.state)):
             if self.te is not None:
                 now=self.te
@@ -866,7 +867,10 @@ class Scenario(object):
             dm.from_naadsm_file(disease_model, ns)
             self.disease_by_type[production_type]=dm
             self.disease_by_id[production_id]=dm
-        if root.find("quarantine-model", ns) is not None:
+        logger.debug("result of find quarantine {0}".format(models.find(
+            "quarantine-model", ns)))
+        if models.find("quarantine-model", ns) is not None:
+            logger.debug("Using quarantine model")
             self.quarantine=QuarantineModel()
         else:
             self.quarantine=NoQuarantineModel()
