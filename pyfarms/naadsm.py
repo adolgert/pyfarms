@@ -8,7 +8,7 @@ import pyfarms.util as util
 import pyfarms.farms as farms
 import gspn
 
-logger=logging.getLogger(__file__)
+logger=logging.getLogger("naadsm")
 
 
 class Monitors(object):
@@ -56,17 +56,16 @@ class InitialConditionsNAADSM(object):
 
 # This is the part that runs the SIR
 def observer(transition, when):
-    if isinstance(transition, farms.DiseaseABTransition):
-        print("AB {0} {1} {2} {3}".format(transition.place.disease_model.farm.name,
-            transition.a, transition.b, when))
-    elif isinstance(transition, farms.InfectTransition):
-        print("Infect {0} {1} {2}".format(transition.intensity.place.disease_model.farm.name,
-            transition.action.farm.farm.name,
-            when))
-    elif isinstance(transition, farms.QuarantineTransition):
-        print("Quarantine {0}".format(when))
+    tname=transition.__class__.__name__
+    if len(transition.farm)>1:
+        who, whom=[x.name for x in transition.farm]
     else:
-        print("Unknown transition {0}".format(transition))
+        whom=transition.farm[0].name
+        who=whom
+    if tname=="DiseaseABTransition":
+        print("{0} {1}".format(transition, when))
+    else:
+        print("{0} {1} {2} {3}".format(tname, who, whom, when))
     return when<365
 
 

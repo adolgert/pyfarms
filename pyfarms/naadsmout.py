@@ -59,6 +59,7 @@ def naadsm_flow(filename, initial):
     run=-1
     transitions_type={(0,1) : 0, (1,3) : 1, (3,4) : 3,
         (4,0) : 4, (0,3) : 5, (0,4) : 6, (1,4) : 8}
+    logger.info("Reading file {0}".format(filename))
     with open(filename, "r") as f:
         line=f.readline()
         while line is not "":
@@ -110,8 +111,11 @@ def events_from_states(state_array, transitions_dict, initial):
     for i in range(0, len(state_array)):
         for j in np.where(state_array[i]!=previous)[0]:
             key=(int(previous[j]), int(state_array[i][j]))
+            if key==(1,4):
+                events.append((transitions_dict[(1,3)], j, j, i))
+                key=(3,4)
             event=transitions_dict[key]    
-            day=i+1
+            day=i
             who=j
             whom=j
             events.append((event, whom, who, day))
@@ -169,9 +173,12 @@ def single_disease_stats(filename):
         for events in naadsm_flow(filename, initial):
             last_event_time=0
             for e in events:
-                event_time=e[3]
-                times[e[0]][event_time-last_event_time]+=1
-                last_event_time=event_time
+                if e[0] in times.keys():
+                    event_time=e[3]
+                    times[e[0]][event_time-last_event_time]+=1
+                    last_event_time=event_time
+                else:
+                    logger.warning("key {0} not found".format(e[0]))
         pickle.dump(times, open(cache_file, "wb"))
     else:
         logger.info("Loading times from {0}".format(cache_file))
@@ -179,6 +186,7 @@ def single_disease_stats(filename):
     names={1 : "Latent Period Transition Times",
             3 : "Clinical Period Transition Times"}
     params={1 : (1.34, 0.18), 3 : (13.36, 1.57)}
+    #params={1 : (1.34, 0.18), 3 : (1.34, 0.18)}
     for times_idx in [1, 3]:
         print("XXXXXXXXXXXXXXXXX {0}".format(times_idx))
         x=np.zeros(len(times[times_idx]))
@@ -189,6 +197,15 @@ def single_disease_stats(filename):
             x[i]=time
             y[i]=count
             i+=1
+        a=params[times_idx][0]
+        th=params[times_idx][1]
+        logger.info("Mean value of points {0}.".format(np.dot(x, y)/np.sum(y)))
+        logger.info("Gamma mean {0}".format(a*th))
+        cdf_to_5=scipy.stats.gamma.cdf(0.5, a=a, scale=th)
+        cdf_to_15=scipy.stats.gamma.cdf(1.5, a=a, scale=th)
+        cdf_to_25=scipy.stats.gamma.cdf(2.5, a=a, scale=th)
+        logger.info("Gamma {0}".format((cdf_to_5, cdf_to_15-cdf_to_5,
+            cdf_to_25-cdf_to_15)))
         plot_histogram(x, y, params[times_idx], names[times_idx])
 
 

@@ -26,14 +26,20 @@ class DiseasePlace(object):
     def __init__(self, disease_model):
         self.disease_model=disease_model
         self.state=DiseaseState.susceptible
+        self.when=None
 
 
 class DiseaseABTransition(object):
-    def __init__(self, farm_place, a, b, distribution):
+    def __init__(self, farm, farm_place, a, b, distribution):
+        self.farm=(farm,)
         self.place=farm_place
         self.a=a
         self.b=b
         self.dist=distribution
+        self.te=None
+
+    def __str__(self):
+        return "Disease({0} {1}:{2})".format(self.farm[0].name, self.a, self.b)
 
     def depends(self):
         return [self.place]
@@ -43,11 +49,16 @@ class DiseaseABTransition(object):
 
     def enabled(self, now):
         if self.place.state==self.a:
+            if self.te is not None:
+                now=self.te
             return (True, self.dist(now))
         else:
+            self.te=None
             return (False, None)
 
     def fire(self, now, rng):
+        self.te=None
+        self.place.when=now
         self.place.state=self.b
 
 
@@ -74,7 +85,7 @@ class DetectionIntensity(object):
         return [self.place]
     def intensity(self, now):
         if self.place.state in (DiseaseState.clinical, DiseaseState.recovered):
-            return 1
+            return self.place.when
         return None
 
 
@@ -185,7 +196,7 @@ class DiseaseModel(object):
             args=t[3][2][0]
             def make_dist(dist, args):
                 return lambda enable : dist(*args, te=enable)
-            trans=DiseaseABTransition(self.place, t[1], t[2],
+            trans=DiseaseABTransition(self.farm, self.place, t[1], t[2],
                 make_dist(dist, args))
             writer.add_transition(trans)
 
@@ -199,6 +210,131 @@ class DiseaseModel(object):
         return DetectionIntensity(self)
 
 ###############################################################
+# DetectReport model
+###############################################################
+
+class DetectionPlace(object):
+    def __init__(self):
+        self.reported=False
+
+
+class DetectionTransition(object):
+    """
+    This is detection and reporting, so it's the act of reporting.
+    One farm sets its detection to true and tells the global one.
+    """
+    def __init__(self, model):
+        self.te=None
+        self.model=model
+        self.farm=(model.farm,)
+    def depends(self):
+        dep=[self.model.place]
+        dep.extend(self.detectable.depends())
+        dep.extend(self.global_intensity.depends())
+        for o in self.observers:
+            dep.extend(o.depends())
+        return dep
+    def affected(self):
+        a=[self.model.place]
+        for o in self.observers:
+            a.extend(o.affected())
+        return a
+    def enabled(self, now):
+        # self.detectable is whether the disease is detectable.
+        if ((self.detectable.intensity(now) is not None)
+                and (not self.model.place.reported)):
+            # If and when was the first observation?
+            # This will be None or it will be a time.
+            first_observation=self.global_intensity.intensity(now)
+
+            if self.te is not None:
+                now=self.te
+            return (True, gspn.ExponentialDistribution(4, now))
+        else:
+            self.te=None
+            return (None, None)
+    def fire(self, now, rng):
+        logger.debug("DetectionTransiton fire {0}".format(id(self.model.place)))
+        self.model.place.reported=True
+        self.te=None
+        for observer in self.observers:
+            observer.fire(now, rng)
+
+class DetectedIntensity(object):
+    def __init__(self, model):
+        self.model=model
+        self.place=model.place
+    def depends(self):
+        return [self.place]
+    def intensity(self, now):
+        return self.place.reported
+
+
+class DetectionModel(object):
+    def __init__(self, global_model):
+        self.farm=None
+        self.global_model=global_model
+    def __str__(self):
+        if self.farm is None:
+            return "DetectionModel({0}, {1}, {2})".format(
+                id(self.global_model), self.detect, self.report)
+        else:
+            return "DetectionModel({0}, {1}, {2}, {3}, {4})".format(
+                self.farm.name, id(self.place), id(self.global_model),
+                self.detect, self.report)
+    def from_naadsm_file(self, detect_model, ns):
+        obs=detect_model.find("prob-report-vs-time-clinical", ns)
+        obs_rel=obs.find("relational-function")
+        x=list()
+        y=list()
+        for val in obs_rel:
+            if val.tag=="value":
+                x.append(int(val[0].text))
+                y.append(float(val[1].text))
+            else:
+                logger.error("unknown tag in relational-function")
+        self.detect=(x,y)
+        obs=detect_model.find("prob-report-vs-time-since-outbreak", ns)
+        obs_rel=obs.find("relational-function")
+        x1=list()
+        y1=list()
+        for val in obs_rel:
+            if val.tag=="value":
+                x1.append(int(val[0].text))
+                y1.append(float(val[1].text))
+            else:
+                logger.error("unknown tag in relational-function")
+        self.report=(x1, y1)
+
+    def clone(self, farm):
+        dm=copy.copy(self)
+        dm.farm=farm
+        dm.place=DetectionPlace()
+        dm.observers=list([self.global_model.on_detect()])
+        return dm
+    def is_detected(self):
+        return DetectedIntensity(self)
+
+    def on_detect(self, observer):
+        """
+        Observers of detection are partial transitions, which means
+        they fire, have dependencies, and have affected places.
+        """
+        self.observers.append(observer)
+    def write_places(self, writer):
+        writer.add_place(self.place)
+
+    def write_transitions(self, writer):
+        dt=DetectionTransition(self)
+        dt.observers=self.observers
+        dt.detectable=self.farm.detectable_intensity()
+        dt.global_intensity=self.global_model.when_detected()
+        dt.observers.append(self.global_model.on_detect())
+        writer.add_transition(dt)
+
+
+
+###############################################################
 # Quarantine model
 ###############################################################
 class QuarantinePlace(object):
@@ -208,7 +344,9 @@ class QuarantinePlace(object):
 class QuarantineTransition(object):
     def __init__(self, model):
         self.model=model
-        self.detectable=model.farm.detectable_intensity()
+        self.farm=(model.farm,)
+        self.detectable=model.farm.detection.is_detected()
+        self.te=None
 
     def depends(self):
         dep=[self.model.place]
@@ -219,12 +357,20 @@ class QuarantineTransition(object):
         return [self.model.place]
 
     def enabled(self, now):
+        """
+        Quarantine happens "a day after" reporting.
+        """
         if ((self.detectable.intensity(now) is not None)
                 and (self.model.place.state is False)):
-            return (True, gspn.ExponentialDistribution(0.1, now))
+            if self.te is not None:
+                now=self.te
+            return (True, gspn.UniformDistribution(0.5, 1.5, now))
         else:
+            self.te=None
             return (None, None)
+
     def fire(self, now, rng):
+        self.te=None
         self.model.place.state=True
 
 class QuarantineIntensity(object):
@@ -309,15 +455,18 @@ class Farm(object):
         fm.name=name
         fm.size=size
         fm.disease=self.disease.clone(fm)
+        fm.detection=self.detection.clone(fm)
         fm.quarantine=self.quarantine.clone(fm)
         return fm
 
     def write_places(self, writer):
         self.disease.write_places(writer)
+        self.detection.write_places(writer)
         self.quarantine.write_places(writer)
 
     def write_transitions(self, writer):
         self.disease.write_transitions(writer)
+        self.detection.write_transitions(writer)
         self.quarantine.write_transitions(writer)
 
     def infectious_intensity(self):
@@ -327,6 +476,10 @@ class Farm(object):
         return self.disease.infection_partial()
 
     def detectable_intensity(self):
+        """
+        An intensity indicating whether disease at the farm
+        is detectable.
+        """
         return self.disease.detectable_intensity()
 
     def send_shipments(self):
@@ -337,6 +490,56 @@ class Farm(object):
 
 
 ##############################################################
+# Model for whether the authorities have seen any reports.
+##############################################################
+class GlobalDetectPlace(object):
+    def __init__(self):
+        self.detected=False
+        self.when=None
+
+class GlobalDetectPartial(object):
+    def __init__(self, model):
+        self.model=model
+    def depends(self):
+        return [self.model.place]
+    def affected(self):
+        return [self.model.place]
+    def intensity(self, now):
+        return True
+    def fire(self, now, rng):
+        if not self.model.place.detected:
+            logger.debug("First global detection")
+            self.model.place.detected=True
+            self.model.place.when=now
+
+class GlobalDetectIntensity(object):
+    def __init__(self, model):
+        self.model=model
+    def depends(self):
+        return [self.model.place]
+    def affected(self):
+        return []
+    def intensity(self, now):
+        return self.model.place.when
+
+class GlobalDetectionModel(object):
+    def __init__(self):
+        self.place=GlobalDetectPlace()
+
+    def on_detect(self):
+        return GlobalDetectPartial(self)
+
+    def when_detected(self):
+        return GlobalDetectIntensity(self)
+
+    def write_places(self, writer):
+        writer.add_place(self.place)
+
+    def write_transitions(self, writer):
+        # This class doesn't own its own transitions.
+        pass
+
+##############################################################
 # Kernel-based neighbor infection
 ##############################################################
 class InfectTransition(object):
@@ -344,7 +547,8 @@ class InfectTransition(object):
     This transition brings together pieces from different models
     into a full transition.
     """
-    def __init__(self, intensity, action, rate):
+    def __init__(self, farms, intensity, action, rate):
+        self.farm=farms
         self.intensity=intensity
         self.action=action
         self.rate=rate
@@ -411,7 +615,7 @@ class InfectNeighborModel(object):
     def write_transitions(self, writer):
         base=self.hazard(self.distance)
         rate=base*self.special[self.farma.size]*self.special[self.farmb.size]
-        writer.add_transition(InfectTransition(
+        writer.add_transition(InfectTransition((self.farma, self.farmb),
             self.farma.infectious_intensity(), self.farmb.infection_partial(),
             rate))
 
@@ -448,7 +652,7 @@ class RestrictionPlace(object):
 
 class RestrictionTransition(object):
     def __init__(self, farm, restriction_place):
-        self.farm=farm
+        self.farm=(farm,)
         self.place=restriction_place
         self.detectable=farm.detectable_intensity()
         self.te=None
@@ -472,6 +676,7 @@ class RestrictionTransition(object):
             return (False, None)
 
     def fire(self, now, rng):
+        self.te=None
         self.place.restricted_date=now
 
 class RestrictionIntensity(object):
@@ -513,7 +718,7 @@ class DirectTransition(object):
     number of shipments a day.
     """
     def __init__(self, farm, model):
-        self.farm=farm
+        self.farm=(farm,)
         self.model=model
     def depends(self):
         pass
@@ -594,6 +799,7 @@ class Scenario(object):
         Given a landscape, make instances from the models.
         """
         assert(self.models_loaded)
+
         self.farms=list()
         for p in landscape.premises:
             f=self.farm_models[p.production_type].clone(p.name, p.size)
@@ -633,9 +839,13 @@ class Scenario(object):
         """
         Given instances, write places and transitions into a net.
         """
+        self.global_detection.write_places(net)
+        self.global_detection.write_transitions(net)
+
         for f in self.farms:
             f.write_places(net)
             f.write_transitions(net)
+
         for airborne_instance in self.airborne:
             airborne_instance.write_places(net)
             airborne_instance.write_transitions(net)
@@ -660,6 +870,16 @@ class Scenario(object):
         else:
             self.quarantine=NoQuarantineModel()
 
+        self.global_detection=GlobalDetectionModel()
+        self.detect_models=dict()
+        for detect_model in models.findall("detection-model", ns):
+            production_type=detect_model.attrib["production-type"]
+            production_id=detect_model.attrib["production-type-id"]
+            dm=DetectionModel(self.global_detection)
+            dm.from_naadsm_file(detect_model, ns)
+            self.detect_models[production_type]=dm
+            logger.debug(dm)
+
         self.spread_models=dict()
         for neighbor_model in models.findall(
                 "airborne-spread-exponential-model", ns):
@@ -674,6 +894,7 @@ class Scenario(object):
             f=Farm()
             f.disease=self.disease_by_type[production_type]
             f.quarantine=self.quarantine
+            f.detection=self.detect_models[production_type]
             self.farm_models[production_type]=f
 
         self.models_loaded=True
