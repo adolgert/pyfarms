@@ -963,6 +963,8 @@ class Scenario(object):
                 dx=landscape.distances[aidx, bidx]
                 air_model=self.spread_models[(from_type, to_type)].clone(a, b, dx)
                 self.airborne.append(air_model)
+        else:
+            self.airborne=list()
 
         ### Indirect Contact
         self.indirect=list()
@@ -1000,9 +1002,9 @@ class Scenario(object):
             f.write_places(net)
             f.write_transitions(net)
 
-        # for airborne_instance in self.airborne:
-        #     airborne_instance.write_places(net)
-        #     airborne_instance.write_transitions(net)
+        for airborne_instance in self.airborne:
+            airborne_instance.write_places(net)
+            airborne_instance.write_transitions(net)
 
         for indirect_instance in self.indirect:
             indirect_instance.write_places(net)

@@ -96,6 +96,9 @@ def load_naadsm_scenario(scenario_filename, herd_filename):
     scenario=farms.Scenario()
     scenario.from_naadsm_file(sxml, ns)
 
+    # Turn off all airborne spread.
+    scenario.spread_models.clear()
+
     net=farms.Build(scenario, landscape)
 
     initial=InitialConditionsNAADSM()
