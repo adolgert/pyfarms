@@ -13,6 +13,7 @@ and quiet switches affect logging.
 import sys
 from argparse import ArgumentParser
 import logging
+import logging.handlers
 import unittest
 
 class DefaultArgumentParser(ArgumentParser):
@@ -70,7 +71,14 @@ class DefaultArgumentParser(ArgumentParser):
             log_level=logging.DEBUG
         elif args.quiet:
             log_level=logging.ERROR
-        logging.basicConfig(level=log_level)
+        root_logger=logging.getLogger()
+        root_logger.setLevel(log_level)
+
+        console_handler=logging.StreamHandler(stream=sys.stdout)
+        console_handler.setLevel(log_level)
+        formatter=logging.Formatter(fmt="{module}.{funcName}:{lineno} {message}", datefmt="", style="{")
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
 
         if 'test' in dir(args) and args.test:
             unittest.TextTestRunner(verbosity=2).run(self.tests())

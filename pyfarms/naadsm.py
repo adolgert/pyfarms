@@ -8,7 +8,7 @@ import pyfarms.util as util
 import pyfarms.farms as farms
 import gspn
 
-logger=logging.getLogger("naadsm")
+logger=logging.getLogger("pyfarms.naadsm")
 
 
 class Monitors(object):

@@ -1,7 +1,9 @@
 import os
 import os.path
+import logging
 import numpy as np
 
+logger=logging.getLogger("pyframs.util")
 
 def effectively_readable(path):
     import os, stat

@@ -9,7 +9,7 @@ import scipy.spatial.distance as distance
 import gspn
 import pyfarms.util as util
 
-logger=logging.getLogger("farms")
+logger=logging.getLogger("pyfarms.farms")
 
 
 ##############################################################
@@ -263,7 +263,7 @@ class DetectionTransition(object):
             self.te=None
             return (None, None)
     def fire(self, now, rng):
-        logger.debug("DetectionTransiton fire {0}".format(id(self.model.place)))
+        logger.debug("DetectionTransition fire {0}".format(id(self.model.place)))
         self.model.place.reported=True
         self.te=None
         for observer in self.observers:
@@ -769,6 +769,7 @@ class IndirectModel(object):
         self.destination_rates=destination_rates
 
     def clone(self, distances, farm_models, farm_idx):
+        logger.debug("IndirectModel clone farm {0}".format(farm_idx))
         im=copy.copy(self)
         im.farms=farm_models
         im.distances=distances
@@ -1055,7 +1056,8 @@ class Scenario(object):
         self.indirect_ab_models=dict()
         self.indirect_models=dict()
         for production_type in self.disease_by_type.keys():
-            self.indirect_models[production_type]=IndirectModel(production_type, None)
+            self.indirect_models[production_type]=IndirectModel(
+                    production_type, None)
 
         self.farm_models=dict() # production_type => farm model
         for production_type in self.disease_by_type.keys():
