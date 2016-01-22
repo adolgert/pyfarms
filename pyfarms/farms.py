@@ -136,9 +136,36 @@ def read_naadsm_pdf(pdf_owner, ns):
             days=int(child.text)
             if days>0:
                 dist=(stage_name, gspn.UniformDistribution, days-0.5, days+0.5)
+        elif child.tag=="uniform":
+            a=float(child.find("a", ns).text)
+            b=float(child.find("b", ns).text)
+            dist=(stage_name, gspn.UniformDistribution, a, b)
+        elif child.tag=="units":
+            logger.debug("Ignoring the units tag.")
         else:
             logger.error("Unknown distribution {0}".format(child.tag))
     return dist
+
+
+def read_naadsm_relational(obs, ns):
+    obs_rel=obs.find("relational-function", ns)
+    if obs_rel is None:
+        logger.error("Could not find relational-function in {0}".format(
+                obs))
+        return tuple()
+    x=list()
+    y=list()
+    for val in obs_rel:
+        if val.tag=="value":
+            x.append(float(val[0].text))
+            y.append(float(val[1].text))
+        elif val.tag=="x-units":
+            pass
+        elif val.tag=="y-units":
+            pass
+        else:
+            logger.error("unknown tag in relational-function")
+    return (x, y)
 
 
 class DiseaseModel(object):
@@ -292,28 +319,13 @@ class DetectionModel(object):
                 self.farm.name, id(self.place), id(self.global_model),
                 self.detect, self.report)
     def from_naadsm_file(self, detect_model, ns):
-        obs=detect_model.find("prob-report-vs-time-clinical", ns)
-        obs_rel=obs.find("relational-function")
-        x=list()
-        y=list()
-        for val in obs_rel:
-            if val.tag=="value":
-                x.append(int(val[0].text))
-                y.append(float(val[1].text))
-            else:
-                logger.error("unknown tag in relational-function")
-        self.detect=(x,y)
+        clinobs=detect_model.find("prob-report-vs-time-clinical", ns)
+        clinobs_rel=clinobs.find("relational-function")
+        self.detect=read_naadsm_relational(clinobs, ns)
+
         obs=detect_model.find("prob-report-vs-time-since-outbreak", ns)
         obs_rel=obs.find("relational-function")
-        x1=list()
-        y1=list()
-        for val in obs_rel:
-            if val.tag=="value":
-                x1.append(int(val[0].text))
-                y1.append(float(val[1].text))
-            else:
-                logger.error("unknown tag in relational-function")
-        self.report=(x1, y1)
+        self.report=read_naadsm_relational(obs, ns)
 
     def clone(self, farm):
         dm=copy.copy(self)
@@ -764,9 +776,8 @@ class IndirectModel(object):
     The NAADSM model for indirect contact, which means trucks without animals.
     There is a different model for each source production type.
     """
-    def __init__(self, source_production_type, destination_rates):
-        self.source_production_type=source_production_type
-        self.destination_rates=destination_rates
+    def __init__(self):
+        pass
 
     def clone(self, distances, farm_models, farm_idx):
         logger.debug("IndirectModel clone farm {0}".format(farm_idx))
@@ -776,6 +787,23 @@ class IndirectModel(object):
         im.source_idx=farm_idx
         return im
 
+    def from_naadsm_file(self, root, ns):
+        self.from_production=root.attrib["from-production-type"]
+        self.to_production=root.attrib["to-production-type"]
+        # movement per day
+        self.movement_rate=float(root.find("movement-rate/value", ns).text)
+        # distance kilometers
+        self.distance=read_naadsm_pdf(root.find("distance"), ns)
+        self.delay=read_naadsm_pdf(root.find("delay", ns), ns)
+        self.probability_infect=float(root.find("prob-infect").text)
+        self.latent_can_infect=bool(
+                root.find("latent-units-can-infect", ns).text)
+        self.subclinical_can_infect=bool(
+                root.find("subclinical-units-can-infect", ns).text)
+        self.movement_control=read_naadsm_relational(
+                root.find("movement-control", ns), ns)
+
+
     def write_places(self, writer):
         pass
 
@@ -783,6 +811,12 @@ class IndirectModel(object):
         t=IndirectTransition(self.farms, self.distances, self.source_idx)
         writer.add_transition(t)
 
+    def __str__(self):
+        s=("IndirectModel({from_production}, {to_production}) "+
+            "movement={movement_rate} probability infect {probability_infect} "+
+            "latent can infect {latent_can_infect} subclinical can infect "+
+            "{subclinical_can_infect}")
+        return s.format(**self.__dict__)
 
 
 
@@ -1055,9 +1089,20 @@ class Scenario(object):
 
         self.indirect_ab_models=dict()
         self.indirect_models=dict()
-        for production_type in self.disease_by_type.keys():
-            self.indirect_models[production_type]=IndirectModel(
-                    production_type, None)
+        for indirect_model in models.findall("contact-spread-model", ns):
+            from_production=indirect_model.attrib["from-production-type"]
+            to_production=indirect_model.attrib["to-production-type"]
+            contact_type=indirect_model.attrib["contact-type"]
+            if contact_type=="indirect":
+                inm=IndirectModel()
+                inm.from_naadsm_file(indirect_model, ns)
+                logger.debug("from_naadsm_file: indirect {0}".format(inm))
+                self.indirect_models[(from_production, to_production)]=inm
+            elif contact_type=="direct":
+                logger.warn("Ignoring direct contact model")
+            else:
+                logger.warn("Unknown contact spread model {0}".format(
+                        contact_type))
 
         self.farm_models=dict() # production_type => farm model
         for production_type in self.disease_by_type.keys():

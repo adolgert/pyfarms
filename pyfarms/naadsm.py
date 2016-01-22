@@ -1,3 +1,4 @@
+import sys
 import os.path
 import xml.etree.ElementTree as etree
 import xml.parsers.expat.errors
@@ -83,12 +84,14 @@ def load_naadsm_scenario(scenario_filename, herd_filename):
         logger.error("Could not parse {0} at line {1} with error \"{2}\"".format(
             scenario_filename, err.position,
             xml.parsers.expat.errors.messages[err.code]))
+        sys.exit(1)
     try:
         hxml=etree.parse(herd_filename)
     except etree.ParseError as err:
         logger.error("Could not parse {0} at line {1} with error {2}".format(
             herd_filename, err.position,
             xml.parsers.expat.errors.messages[err.code]))
+        sys.exit(1)
     
     landscape=farms.Landscape()
     landscape.from_naadsm_file(hxml, ns)
