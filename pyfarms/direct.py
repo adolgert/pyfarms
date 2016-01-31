@@ -96,6 +96,81 @@ def naadsm_direct(scenario, run_cnt=1):
     return hits
 
 
+class Exposure(object):
+    def __init__(self, desired_distance, difference):
+        self.desired_distance=desired_distance
+        self.difference=difference
+        self.target_idx=None
+        self.target_distance=None
+        self.cumulative_size=0
+
+def find_in_list(distances, sizes, exposure, within_radius):
+    """
+    Corresponds to the check_and_choose function.
+    Given a unit, ask which exposure might accept it as a target.
+    """
+    for target_idx in within_radius:
+        for exp in exposure:
+            difference=abs(distances[target_idx]-
+                    exp.exposure_distance)
+            if exp.target_idx is None:
+                exp.target_idx=target_idx
+                exp.target_distance=distances[target_idx]
+                exp.difference=difference
+                exp.cumulative_size+=sizes[target_idx]
+            elif abs(difference-exp.difference)<scenario.epsilon:
+                chance=np.random()< scenario.size[target_idx]/exp.cumulative_size
+                allowed=zoned[target_idx] is False and quarantined[target_idx] is False
+                if allowed and chance:
+                    exp.target_idx=target_idx
+                    exp.target_distance=distances[target_idx]
+                    exp.difference=difference
+                    exp.cumulative_size+=sizes[target_idx]
+            elif difference < exp.difference:
+                exp.target_idx=target_idx
+                exp.target_distance=distances[target_idx]
+                exp.difference=difference
+                exp.cumulative_size+=sizes[target_idx]
+            else:
+                pass
+
+
+def naadsm_code(scenario, run_cnt=1):
+    """
+    This follows the code from NAADSM 3.2 in contact-spread-model.c.
+    """
+    pts=scenario.pts
+    zoned=scenario.zoned
+    quarantined=scenario.quarantined
+    start_idx=scenario.start_idx
+    start_loc=pts[start_idx].reshape(1,2)
+    distances=spatial.distance.cdist(recipients, start_loc).flatten()
+
+    hits=np.zeros(pts.shape[0], dtype=np.int)
+
+    within_radius=list()
+    for rad_idx in range(pts.shape[0]):
+        if (distance_sq(pts[rad_idx], start_loc)<max_distance_sq and
+                rad_idx!=start_idx):
+            within_radius.append(rad_idx)
+
+    for run_idx in range(run_cnt):
+        exposure_cnt=np.random.poisson(scenario.infection_rate)
+        exposure=list()
+        for e_idx in range(exposure_cnt):
+            exposure_distance=
+                    np.random.uniform(0, scenario.uniform_kernel_max,
+                    size=exposure_cnt)
+            exposure.append(Exposure(exposure_distance))
+        find_in_list(distances, scenario.sizes, exposure, within_radius)
+        if any([x.target_idx is None for x in exposure]):
+            find_in_list(distances, scenario.sizes, exposure, range(pts.shape[0]))
+
+        for res in exposure:
+            if not (quarantined[res.target_idx] or zoned[res.target_idx]):
+                hits[target_idx]+=1
+
+
 def faithful(scenario, run_cnt=1):
     """
     This is an attempt at an equivalent continuous-time model.
