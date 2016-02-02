@@ -774,7 +774,9 @@ class IndirectTransition(object):
 class IndirectModel(object):
     """
     The NAADSM model for indirect contact, which means trucks without animals.
-    There is a different model for each source production type.
+    There is a different model for each source production type. There will
+    be an insance of this model for each source farm and for each
+    possible destination production type.
     """
     def __init__(self):
         pass
@@ -790,6 +792,7 @@ class IndirectModel(object):
     def from_naadsm_file(self, root, ns):
         self.from_production=root.attrib["from-production-type"]
         self.to_production=root.attrib["to-production-type"]
+        self.contact_type=root.attrib["contact-type"] # direct or indirect
         # movement per day
         self.movement_rate=float(root.find("movement-rate/value", ns).text)
         # distance kilometers
@@ -958,6 +961,19 @@ class Landscape(object):
             self.add_premises(unit_name, unit_type, unit_size, latlon)
         self._build()
 
+    def from_landscape(self, production_type):
+        """
+        Look at just the part of the landscape that's one production type.
+        Distances matrix is no longer square. It's from any type A to
+        B of only a single type.
+        """
+        l=Landscape()
+        farm_locations=list()
+        for pidx, p in enumerate(self.premises):
+            if p.production_type==production_type:
+                l.premises.append(p)
+                farm_locations.append(x.latlon)
+
     def _build(self):
         self.farm_locations=np.array([x.latlon for x in self.premises])
         self.distances=distance.squareform(
@@ -1001,15 +1017,15 @@ class Scenario(object):
         else:
             self.airborne=list()
 
-        ### Indirect Contact
+        ### Indirect and Direct Contact
         self.indirect=list()
-        if len(self.indirect_models)>0:
+        if len(self.contact_models)>0:
             for ind_idx in range(len(self.farms)):
                 f=self.farms[ind_idx]
                 p=landscape.premises[ind_idx]
-                im=self.indirect_models[p.production_type].clone(
-                    landscape.distances, self.farms, ind_idx)
-                self.indirect.append(im)
+                for cm in self.contact_models[p.production_type]:
+                    im=cm.clone(landscape.distances, self.farms, ind_idx)
+                    self.indirect.append(im)
 
 
     def clone(self):
@@ -1087,8 +1103,7 @@ class Scenario(object):
             im.from_naadsm_file(neighbor_model, ns)
             self.spread_models[(from_production, to_production)]=im
 
-        self.indirect_ab_models=dict()
-        self.indirect_models=dict()
+        self.contact_models=collections.defaultdict(list)
         for indirect_model in models.findall("contact-spread-model", ns):
             from_production=indirect_model.attrib["from-production-type"]
             to_production=indirect_model.attrib["to-production-type"]
@@ -1097,7 +1112,7 @@ class Scenario(object):
                 inm=IndirectModel()
                 inm.from_naadsm_file(indirect_model, ns)
                 logger.debug("from_naadsm_file: indirect {0}".format(inm))
-                self.indirect_models[(from_production, to_production)]=inm
+                self.contact_models[from_production].append(inm)
             elif contact_type=="direct":
                 logger.warn("Ignoring direct contact model")
             else:
@@ -1107,6 +1122,7 @@ class Scenario(object):
         self.farm_models=dict() # production_type => farm model
         for production_type in self.disease_by_type.keys():
             f=Farm()
+            f.production_type=production_type
             f.disease=self.disease_by_type[production_type]
             f.quarantine=self.quarantine
             f.detection=self.detect_models[production_type]
