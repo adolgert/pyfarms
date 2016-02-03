@@ -692,27 +692,29 @@ class InfectNeighborModel(object):
 ##############################################################
 
 class IndirectTransition(object):
-    def __init__(self, farms, distances, source_idx):
-        self.farm=(farms[source_idx],)
-        self.farms=farms
+    def __init__(self, landscape, source_farm, source_idx, rate, dist_pdf):
+        self.farm=source_farm
+        self.farm_idx=source_idx
+        self.landscape=landscape
+        self.rate=rate
+        self.distance_pdf=dist_pdf
         # Distances is an array matrix. Take the row and delete
         # the self-to-self distance.
-        self.distances=np.delete(distances[source_idx,:], source_idx)
-        self.source_idx=source_idx
-        self.source_intensity=self.farms[source_idx].infectious_intensity()
-        self.sending=self.farms[source_idx].send_shipments()
+        self.source_intensity=self.farm.infectious_intensity()
+        self.sending=self.farm.send_shipments()
         self.infectable=list()
         self.receiving=list()
-        for farm_idx in range(len(self.farms)):
+        for farm_idx, target in enumerate(self.landscape.premises):
             if farm_idx!=self.source_idx:
                 # Is this the right question? Want that they aren't quarantined.
-                self.infectable.append(self.farms[farm_idx].infection_partial())
-                self.receiving.append(self.farms[farm_idx].receive_shipments())
+                self.infectable.append(target.infection_partial())
+                self.receiving.append(target.receive_shipments())
         self.affected_idx=source_idx
 
     def __str__(self):
-        return "Indirect({0},{1})".format(self.farms[self.source_idx].name,
-            self.farms[self.affected_idx].name)
+        return "Indirect({0}-{1} {2})".format(self.farm.name,
+                self.landscape.premises[affected_idx].name,
+                self.landscape.production_type)
 
     def depends(self):
         d=self.source_intensity.depends()
@@ -739,14 +741,16 @@ class IndirectTransition(object):
             receiving=self.receiving[tidx].intensity(now)
             if uninfected and receiving:
                 self.current_recipients.append(tidx)
-                current_distances.append(self.distances[tidx])
+                current_distances.append(
+                    self.landscape.distances[self.farm_idx, tidx])
         current_distances=np.array(current_distances)
         if len(self.current_recipients) is 0:
             return (False, None)
         sort_idx=np.argsort(current_distances)
         prob_basket=np.zeros(len(current_distances), dtype=np.double)
-        uniform_max=160.0
-        inner=0.0
+        assert(self.distance_pdf[1]==gspn.UniformDistribution)
+        uniform_max=self.distance_pdf[3]
+        inner=self.distance_pdf[2]
         for didx in range(0, len(current_distances)-1):
             ptidx=sort_idx[didx]
             if inner<uniform_max:
@@ -758,7 +762,7 @@ class IndirectTransition(object):
         if not total_prob>0.0:
             return (False, None)
         self.prob_basket=prob_basket/total_prob
-        self.overall_rate=1.5
+        self.overall_rate=self.rate
         return (True, gspn.ExponentialDistribution(self.overall_rate, now))
 
     def fire(self, now, rng):
@@ -781,11 +785,11 @@ class IndirectModel(object):
     def __init__(self):
         pass
 
-    def clone(self, distances, farm_models, farm_idx):
+    def clone(self, landscape, farm_idx):
         logger.debug("IndirectModel clone farm {0}".format(farm_idx))
         im=copy.copy(self)
-        im.farms=farm_models
-        im.distances=distances
+        im.landscape=landscape.single_production[self.to_production]
+        im.source_farm=landscape.premises[farm_idx]
         im.source_idx=farm_idx
         return im
 
@@ -796,7 +800,7 @@ class IndirectModel(object):
         # movement per day
         self.movement_rate=float(root.find("movement-rate/value", ns).text)
         # distance kilometers
-        self.distance=read_naadsm_pdf(root.find("distance"), ns)
+        self.distance_pdf=read_naadsm_pdf(root.find("distance"), ns)
         self.delay=read_naadsm_pdf(root.find("delay", ns), ns)
         self.probability_infect=float(root.find("prob-infect").text)
         self.latent_can_infect=bool(
@@ -811,7 +815,8 @@ class IndirectModel(object):
         pass
 
     def write_transitions(self, writer):
-        t=IndirectTransition(self.farms, self.distances, self.source_idx)
+        t=IndirectTransition(self.landscape, self.source_farm, self.source_idx,
+                self.movement_rate, self.distance_pdf)
         writer.add_transition(t)
 
     def __str__(self):
@@ -922,12 +927,16 @@ class Landscape(object):
     The landscape is the world upon which the rules act.
     It knows where farms are, what types of production are at
     each farm. It has data about the world.
+
+    The landscape contains sub-copies of itself for each
+    production type.
     """
     def __init__(self):
         self.premises=list()
         self.farm_locations=np.zeros(0)
         self.distances=np.zeros((0,0))
         self.production_types=set()
+        self.production_landscapes=dict()
         # self.farm_locations=gspn.thomas_point_process_2D(
         #     5, 0.1, 5, (0, 1, 0, 1))
         # individual_cnt=self.farm_locations.shape[0]
@@ -953,6 +962,7 @@ class Landscape(object):
         for unit in root.findall("herd", ns):
             unit_name=unit.find("id").text
             unit_type=unit.find("production-type").text
+            self.production_types.add(unit_type)
             unit_size=int(unit.find("size").text)
             location=unit.find("location")
             lat=float(location.find("latitude").text)
@@ -961,24 +971,33 @@ class Landscape(object):
             self.add_premises(unit_name, unit_type, unit_size, latlon)
         self._build()
 
-    def from_landscape(self, production_type):
+    def single_production(self, production_type):
+        return self.production_landscapes[production_type]
+
+
+    def _single_production(self, production_type):
         """
         Look at just the part of the landscape that's one production type.
         Distances matrix is no longer square. It's from any type A to
         B of only a single type.
         """
         l=Landscape()
-        farm_locations=list()
-        for pidx, p in enumerate(self.premises):
-            if p.production_type==production_type:
-                l.premises.append(p)
-                farm_locations.append(x.latlon)
+        l.production_type=production_type
+        l.farm_indices=np.array([i for (i, x) in enumerate(self.premises)
+            if premises.production_type==production_type])
+        l.premises=[self.premises[ii] for ii in l.farm_indices]
+        l.farm_locations=self.farm_locations[l.farm_indices]
+        l.distances=self.distances[:, l.farm_indices]
+        return l
 
     def _build(self):
         self.farm_locations=np.array([x.latlon for x in self.premises])
         self.distances=distance.squareform(
             distance.pdist(self.farm_locations, util.distancekm))
         logger.debug("found {0} premises".format(len(self.premises)))
+        for ptype in self.production_types:
+            logger.debug("Building landscape for {0}".format(ptype))
+            self.production_landscapes[ptype]=self.single_production(ptype)
 
 
 class Scenario(object):
