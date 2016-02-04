@@ -692,9 +692,10 @@ class InfectNeighborModel(object):
 ##############################################################
 
 class IndirectTransition(object):
-    def __init__(self, landscape, source_farm, source_idx, rate, dist_pdf):
+    def __init__(self, landscape, farm_models,
+            source_farm, source_idx, rate, dist_pdf):
         self.farm=source_farm
-        self.farm_idx=source_idx
+        self.source_idx=source_idx
         self.landscape=landscape
         self.rate=rate
         self.distance_pdf=dist_pdf
@@ -704,11 +705,10 @@ class IndirectTransition(object):
         self.sending=self.farm.send_shipments()
         self.infectable=list()
         self.receiving=list()
-        for farm_idx, target in enumerate(self.landscape.premises):
-            if farm_idx!=self.source_idx:
-                # Is this the right question? Want that they aren't quarantined.
-                self.infectable.append(target.infection_partial())
-                self.receiving.append(target.receive_shipments())
+        for target in farm_models:
+            # Is this the right question? Want that they aren't quarantined.
+            self.infectable.append(target.infection_partial())
+            self.receiving.append(target.receive_shipments())
         self.affected_idx=source_idx
 
     def __str__(self):
@@ -785,12 +785,14 @@ class IndirectModel(object):
     def __init__(self):
         pass
 
-    def clone(self, landscape, farm_idx):
+    def clone(self, farm_models, landscape, farm_idx):
         logger.debug("IndirectModel clone farm {0}".format(farm_idx))
         im=copy.copy(self)
-        im.landscape=landscape.single_production[self.to_production]
-        im.source_farm=landscape.premises[farm_idx]
+        im.landscape=landscape.single_production(self.to_production, farm_idx)
+        im.source_farm=farm_models[farm_idx]
+        im.farm_models=[farm_models[i] for i in im.landscape.farm_indices]
         im.source_idx=farm_idx
+        im.source_farm=farm_models[farm_idx]
         return im
 
     def from_naadsm_file(self, root, ns):
@@ -815,8 +817,8 @@ class IndirectModel(object):
         pass
 
     def write_transitions(self, writer):
-        t=IndirectTransition(self.landscape, self.source_farm, self.source_idx,
-                self.movement_rate, self.distance_pdf)
+        t=IndirectTransition(self.landscape, self.farm_models, self.source_farm,
+                self.source_idx, self.movement_rate, self.distance_pdf)
         writer.add_transition(t)
 
     def __str__(self):
@@ -971,11 +973,7 @@ class Landscape(object):
             self.add_premises(unit_name, unit_type, unit_size, latlon)
         self._build()
 
-    def single_production(self, production_type):
-        return self.production_landscapes[production_type]
-
-
-    def _single_production(self, production_type):
+    def single_production(self, production_type, source_farm_idx):
         """
         Look at just the part of the landscape that's one production type.
         Distances matrix is no longer square. It's from any type A to
@@ -983,11 +981,14 @@ class Landscape(object):
         """
         l=Landscape()
         l.production_type=production_type
-        l.farm_indices=np.array([i for (i, x) in enumerate(self.premises)
-            if premises.production_type==production_type])
+        farm_indices=[i for (i, x) in enumerate(self.premises)
+            if x.production_type==production_type]
+        if source_farm_idx in farm_indices:
+            farm_indices.remove(source_farm_idx)
+        l.farm_indices=np.array(farm_indices)
         l.premises=[self.premises[ii] for ii in l.farm_indices]
         l.farm_locations=self.farm_locations[l.farm_indices]
-        l.distances=self.distances[:, l.farm_indices]
+        l.distances=self.distances[source_farm_idx, l.farm_indices]
         return l
 
     def _build(self):
@@ -995,9 +996,6 @@ class Landscape(object):
         self.distances=distance.squareform(
             distance.pdist(self.farm_locations, util.distancekm))
         logger.debug("found {0} premises".format(len(self.premises)))
-        for ptype in self.production_types:
-            logger.debug("Building landscape for {0}".format(ptype))
-            self.production_landscapes[ptype]=self.single_production(ptype)
 
 
 class Scenario(object):
@@ -1043,7 +1041,7 @@ class Scenario(object):
                 f=self.farms[ind_idx]
                 p=landscape.premises[ind_idx]
                 for cm in self.contact_models[p.production_type]:
-                    im=cm.clone(landscape.distances, self.farms, ind_idx)
+                    im=cm.clone(self.farms, landscape, ind_idx)
                     self.indirect.append(im)
 
 
