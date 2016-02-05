@@ -988,6 +988,7 @@ class Landscape(object):
         l.farm_indices=np.array(farm_indices)
         l.premises=[self.premises[ii] for ii in l.farm_indices]
         l.farm_locations=self.farm_locations[l.farm_indices]
+        # This compiles all distances from this particular farm.
         l.distances=self.distances[source_farm_idx, l.farm_indices]
         return l
 
