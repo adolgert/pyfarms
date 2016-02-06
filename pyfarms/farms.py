@@ -694,15 +694,15 @@ class InfectNeighborModel(object):
 class IndirectTransition(object):
     def __init__(self, landscape, farm_models,
             source_farm, source_idx, rate, dist_pdf):
-        self.farm=source_farm
+        self.farm=[source_farm]
         self.source_idx=source_idx
         self.landscape=landscape
         self.rate=rate
         self.distance_pdf=dist_pdf
         # Distances is an array matrix. Take the row and delete
         # the self-to-self distance.
-        self.source_intensity=self.farm.infectious_intensity()
-        self.sending=self.farm.send_shipments()
+        self.source_intensity=self.farm[0].infectious_intensity()
+        self.sending=self.farm[0].send_shipments()
         self.infectable=list()
         self.receiving=list()
         for target in farm_models:
@@ -712,8 +712,8 @@ class IndirectTransition(object):
         self.affected_idx=source_idx
 
     def __str__(self):
-        return "Indirect({0}-{1} {2})".format(self.farm.name,
-                self.landscape.premises[affected_idx].name,
+        return "Indirect({0}-{1} {2})".format(self.farm[0].name,
+                self.landscape.premises[self.affected_idx].name,
                 self.landscape.production_type)
 
     def depends(self):
@@ -742,7 +742,7 @@ class IndirectTransition(object):
             if uninfected and receiving:
                 self.current_recipients.append(tidx)
                 current_distances.append(
-                    self.landscape.distances[self.farm_idx, tidx])
+                    self.landscape.distances[tidx])
         current_distances=np.array(current_distances)
         if len(self.current_recipients) is 0:
             return (False, None)
@@ -985,7 +985,7 @@ class Landscape(object):
             if x.production_type==production_type]
         if source_farm_idx in farm_indices:
             farm_indices.remove(source_farm_idx)
-        l.farm_indices=np.array(farm_indices)
+        l.farm_indices=np.array(farm_indices, dtype=np.int)
         l.premises=[self.premises[ii] for ii in l.farm_indices]
         l.farm_locations=self.farm_locations[l.farm_indices]
         # This compiles all distances from this particular farm.
@@ -993,7 +993,8 @@ class Landscape(object):
         return l
 
     def _build(self):
-        self.farm_locations=np.array([x.latlon for x in self.premises])
+        self.farm_locations=np.array([x.latlon for x in self.premises],
+                dtype=np.double)
         self.distances=distance.squareform(
             distance.pdist(self.farm_locations, util.distancekm))
         logger.debug("found {0} premises".format(len(self.premises)))

@@ -1,5 +1,7 @@
 import os
 import os.path
+import re
+import glob
 import logging
 import numpy as np
 
@@ -44,7 +46,14 @@ def check_filename(filename, argument):
     """
     if filename is None or filename=="":
         raise RuntimeError("No filename given for {0}".format(argument))
-    if not os.path.exists(filename):
+    # Expand the ~ into the home directory in case shell expansion failed.
+    filename=re.sub("^\~", os.environ["HOME"], filename)
+    candidates=glob.glob(filename)
+    if len(candidates) is 1:
+        filename=candidates[0]
+    elif len(candidates) > 1:
+        raise RuntimeError("More than one file matches {0}".format(candidates))
+    else:  #len(candidates) is 0:
         basepath=filename
         prevpath=basepath
         while basepath is not "" and not os.path.exists(basepath):
@@ -61,6 +70,7 @@ def check_filename(filename, argument):
     if not effectively_readable(filename):
         raise RuntimeError(("The file {0} exists, "+
             "but this process cannot read it").format(filename))
+    return filename
 
 
 

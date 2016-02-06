@@ -1,9 +1,21 @@
+"""farmspread
+
+Usage:
+  farmspread [-v] [-q] --scenario=<scenariofile> --herd=<herdfile> [--runs=<runs>] [--stream=<stream>]
+
+Options:
+  -h --help    Show this screen.
+  -v           Verbose
+  -q           Quiet
+"""
 import sys
 import os.path
 import xml.etree.ElementTree as etree
 import xml.parsers.expat.errors
 import logging
 import numpy as np
+import docopt
+import randomstate
 from pyfarms.default_parser import DefaultArgumentParser
 import pyfarms.util as util
 import pyfarms.farms as farms
@@ -100,38 +112,57 @@ def load_naadsm_scenario(scenario_filename, herd_filename):
     scenario.from_naadsm_file(sxml, ns)
 
     # Turn off all airborne spread.
-    scenario.spread_models.clear()
+    #scenario.spread_models.clear()
 
     net=farms.Build(scenario, landscape)
 
     initial=InitialConditionsNAADSM()
     initial.from_naadsm_file(hxml, ns)
-    initial.apply(scenario)
 
     monitors=Monitors()
     monitors.from_naadsm_file(sxml, ns)
 
-    rng=np.random.RandomState()
-    rng.seed(33333)
-    sampler=gspn.NextReaction(net, rng)
-    run=gspn.RunnerFSM(sampler, observer)
-    run.init()
-    run.run()
+    return net, scenario, initial, monitors
+
+
+def mainloop(net, scenario, initial, monitors, runs, stream):
+
+    # rng=np.random.RandomState()
+    # rng.seed(33333)
+    rng=randomstate.prng.pcg64.RandomState(seed=3333334, inc=stream)
+    for run_idx in range(runs):
+        initial.apply(scenario)
+        sampler=gspn.NextReaction(net, rng)
+        run=gspn.RunnerFSM(sampler, observer)
+        run.init()
+        run.run()
 
 
 def load_naadsm():
-    parser=DefaultArgumentParser(description="Load NAADSM XML Files")
-    parser.add_function("load", "Load XML files")
-    parser.add_argument("--scenario", dest="scenario_file", type=str,
-        action="store", default=None, help="Scenario file")
-    parser.add_argument("--herd", dest="herd_file", type=str,
-        action="store", default=None, help="Herd file")
+    arguments = docopt.docopt(__doc__, version="farmspread")
+    if arguments["-v"]:
+        logging.basicConfig(level=logging.DEBUG)
+    elif arguments["-q"]:
+        logging.basicConfig(level=logging.ERROR)
+    else:
+        logging.basicConfig(level=logging.INFO)
 
-    args=parser.parse_args()
-    if args.load:
-        util.check_filename(args.scenario_file, "scenario file")
-        util.check_filename(args.herd_file, "herd file")
-        load_naadsm_scenario(args.scenario_file, args.herd_file)
+    if arguments["--runs"]:
+        runs=int(arguments["--runs"])
+        assert(runs>0)
+    else:
+        runs=1
+    if arguments["--stream"]:
+        print(arguments)
+        stream=int(arguments["--stream"])
+        assert(stream>0)
+    else:
+        stream=1
+
+    scfile=util.check_filename(arguments["--scenario"], "scenario file")
+    hfile=util.check_filename(arguments["--herd"], "herd file")
+    net, scenario, initial, monitors=load_naadsm_scenario(scfile, hfile)
+    mainloop(net, scenario, initial, monitors, runs, stream)
 
 if __name__ == "__main__":
     load_naadsm()

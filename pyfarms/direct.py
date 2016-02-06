@@ -158,7 +158,7 @@ def naadsm_code(scenario, run_cnt=1):
         exposure_cnt=np.random.poisson(scenario.infection_rate)
         exposure=list()
         for e_idx in range(exposure_cnt):
-            exposure_distance=
+            exposure_distance= \
                     np.random.uniform(0, scenario.uniform_kernel_max,
                     size=exposure_cnt)
             exposure.append(Exposure(exposure_distance))
