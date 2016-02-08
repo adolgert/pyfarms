@@ -192,6 +192,9 @@ class DiseaseModel(object):
         logger.debug("Initial infection at {0}".format(self.farm.name))
         self.place.state=DiseaseState.latent
 
+    def initial_susceptible(self):
+        self.place.state=DiseaseState.susceptible
+
     def from_naadsm_file(self, root, ns):
         name_to_state={"latent-period" : DiseaseState.latent,
             "infectious-subclinical-period" : DiseaseState.subclinical,

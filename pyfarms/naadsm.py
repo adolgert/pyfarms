@@ -65,6 +65,8 @@ class InitialConditionsNAADSM(object):
         for f in scenario.farms:
             if f.name in self.infections.keys():
                 f.disease.initial_infection()
+            else:
+                f.disease.initial_susceptible()
 
 
 # This is the part that runs the SIR
@@ -131,6 +133,8 @@ def mainloop(net, scenario, initial, monitors, runs, stream):
     # rng.seed(33333)
     rng=randomstate.prng.pcg64.RandomState(seed=3333334, inc=stream)
     for run_idx in range(runs):
+        logger.debug("mainloop run {0}".format(run_idx))
+        net.init()
         initial.apply(scenario)
         sampler=gspn.NextReaction(net, rng)
         run=gspn.RunnerFSM(sampler, observer)
