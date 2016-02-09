@@ -708,6 +708,7 @@ class IndirectTransition(object):
         self.sending=self.farm[0].send_shipments()
         self.infectable=list()
         self.receiving=list()
+        self.farm_models=farm_models
         for target in farm_models:
             # Is this the right question? Want that they aren't quarantined.
             self.infectable.append(target.infection_partial())

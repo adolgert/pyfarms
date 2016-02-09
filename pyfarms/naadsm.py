@@ -1,15 +1,21 @@
 """farmspread
 
 Usage:
-  farmspread [-v] [-q] --scenario=<scenariofile> --herd=<herdfile> [--runs=<runs>] [--stream=<stream>]
+  farmspread [options] --scenario=<scenariofile> --herd=<herdfile>
 
 Options:
-  -h --help    Show this screen.
-  -v           Verbose
-  -q           Quiet
+  -h --help       Show this screen.
+  -v              Verbose.
+  -q              Quiet.
+  --runs=CNT      How many trajectories to gather. [default: 1]
+  --stream=STREAM The integer number of the random number stream. [default: 1]
+  --out=OUT       Name of an output file. [default: out.hdf5]
+  --chunk=CHUNK   How many runs to do before saving intermediate results.
 """
 import sys
+import os
 import os.path
+import re
 import xml.etree.ElementTree as etree
 import xml.parsers.expat.errors
 import logging
@@ -20,6 +26,7 @@ from pyfarms.default_parser import DefaultArgumentParser
 import pyfarms.util as util
 import pyfarms.farms as farms
 import gspn
+import pyfarms.dataformat as dataformat
 
 logger=logging.getLogger("pyfarms.naadsm")
 
@@ -68,9 +75,80 @@ class InitialConditionsNAADSM(object):
             else:
                 f.disease.initial_susceptible()
 
+class TransID(object):
+    infected=0
+    infectious=1
+    recover=4
+    wane=5
+    detect=10
+    quarantine=11
+    restriction=12
+
+
+_transition_id={
+    (farms.DiseaseState.susceptible, farms.DiseaseState.latent) : TransID.infected,
+    (farms.DiseaseState.latent, farms.DiseaseState.clinical) : TransID.infectious,
+    (farms.DiseaseState.clinical, farms.DiseaseState.recovered) : TransID.recover,
+    (farms.DiseaseState.recovered, farms.DiseaseState.susceptible) : TransID.wane,
+}
+
+
+class StateObserver(object):
+    def __init__(self):
+        self.events=list()
+        self.runs=list()
+
+    def init(self):
+        if self.events:
+            trace=dict()
+            trace["what"]=[x[0] for x in self.events]
+            trace["who"]=[x[1] for x in self.events]
+            trace["whom"]=[x[2] for x in self.events]
+            trace["when"]=[x[3] for x in self.events]
+            self.runs.append(trace)
+            self.events=list()
+
+    def results(self):
+        if self.events:
+            self.init()
+        return self.runs
+
+    def __call__(self, transition, when):
+        tname=transition.__class__.__name__
+        if tname=="DiseaseABTransition":
+            tid=_transition_id[(transition.a, transition.b)]
+            whom=transition.farm[0].name
+            who=whom
+        elif tname=="DetectionTransition":
+            tid=TransID.detect
+            whom=-1
+            who=whom
+        elif tname=="QuarantineTransition":
+            tid=TransID.quarantine
+            whom=transition.farm[0].name
+            who=whom
+        elif tname=="InfectTransition":
+            tid=TransID.infected
+            who=transition.farm[0].name
+            whom=transition.farm[1].name
+        elif tname=="IndirectTransition":
+            tid=TransID.infected
+            who=transition.farm[0].name
+            whom=transition.farm_models[transition.affected_idx].name
+        elif tname=="RestrictionTransition":
+            tid=TransID.restriction
+            who=-1
+            whom=who
+        else:
+            logger.error("Unknown transition {0}".format(tname))
+
+        logger.info((tid, who, whom, when))
+        self.events.append((tid, int(who), int(whom), when))
+        return when<365
+
 
 # This is the part that runs the SIR
-def observer(transition, when):
+def observe(transition, when):
     tname=transition.__class__.__name__
     if len(transition.farm)>1:
         who, whom=[x.name for x in transition.farm]
@@ -127,19 +205,25 @@ def load_naadsm_scenario(scenario_filename, herd_filename):
     return net, scenario, initial, monitors
 
 
-def mainloop(net, scenario, initial, monitors, runs, stream):
-
-    # rng=np.random.RandomState()
-    # rng.seed(33333)
+def mainloop(net, scenario, initial, observer, runs, stream):
     rng=randomstate.prng.pcg64.RandomState(seed=3333334, inc=stream)
     for run_idx in range(runs):
         logger.debug("mainloop run {0}".format(run_idx))
         net.init()
+        observer.init()
         initial.apply(scenario)
         sampler=gspn.NextReaction(net, rng)
         run=gspn.RunnerFSM(sampler, observer)
         run.init()
         run.run()
+
+
+def multirun(scfile, hfile, runs, stream):
+    net, scenario, initial, monitors=load_naadsm_scenario(scfile, hfile)
+    observer=StateObserver()
+    mainloop(net, scenario, initial, observer, runs, stream)
+    return observer.results(), stream
+
 
 
 def load_naadsm():
@@ -150,6 +234,8 @@ def load_naadsm():
         logging.basicConfig(level=logging.ERROR)
     else:
         logging.basicConfig(level=logging.INFO)
+
+    metadata=dict()
 
     if arguments["--runs"]:
         runs=int(arguments["--runs"])
@@ -163,10 +249,29 @@ def load_naadsm():
     else:
         stream=1
 
+    if arguments["--out"]:
+        outfile=arguments["--out"]
+        outfile=re.sub("^\~", os.environ["HOME"], outfile)
+    else:
+        outfile="out.hdf5"
+
+    if arguments["--chunk"]:
+        chunk_size=int(arguments["--chunk"])
+    else:
+        chunk_size=runs
+
+    dataformat.clear_datafile(outfile)
+
     scfile=util.check_filename(arguments["--scenario"], "scenario file")
     hfile=util.check_filename(arguments["--herd"], "herd file")
-    net, scenario, initial, monitors=load_naadsm_scenario(scfile, hfile)
-    mainloop(net, scenario, initial, monitors, runs, stream)
+
+    metadata.update({"run_cnt" : runs, "stream_idx" : stream,
+        "datafile" : outfile, "chunk_size" : chunk_size,
+        "herd" : hfile, "scenario" : scfile })
+
+    for chunk_idx, run_cnt in util.ChunkIter(runs, chunk_size):
+        results, stream=multirun(scfile, hfile, run_cnt, stream+chunk_size)
+        dataformat.save_runs(outfile, results, metadata)
 
 if __name__ == "__main__":
     load_naadsm()

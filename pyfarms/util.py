@@ -84,3 +84,28 @@ def distancekm(latlon1, latlon2):
     ll2=latlon2*_degrees_to_radians
     return _radians_km*(2*np.arcsin(np.sqrt(np.power(np.sin((ll1[0]-ll2[0])/2),2)+
         np.cos(ll1[0])*np.cos(ll2[0])*np.power(np.sin((ll1[1]-ll2[1])/2), 2))))
+
+
+class ChunkIter(object):
+    """
+    Someone asks for 2100 iterations but wants them in chunks
+    of 250, so this parcels that out, from (0, 250), (1, 250),
+    to (8, 100).
+    """
+    def __init__(self, chunk, total):
+        self.total=total
+        self.chunk=chunk
+
+    def __iter__(self):
+        self.idx=0
+        return self
+
+    def __next__(self):
+        begin=self.idx*self.chunk
+        end=(self.idx+1)*self.chunk
+        if begin<self.total:
+            end=min(self.total, end)
+            self.idx+=1
+            return (self.idx, end-begin)
+        else:
+            raise StopIteration()
