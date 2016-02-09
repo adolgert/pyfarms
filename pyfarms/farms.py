@@ -699,8 +699,8 @@ class IndirectTransition(object):
             source_farm, source_idx, rate, dist_pdf):
         self.farm=[source_farm]
         self.source_idx=source_idx
-        self.landscape=landscape
         self.rate=rate
+        self.landscape=landscape
         self.distance_pdf=dist_pdf
         # Distances is an array matrix. Take the row and delete
         # the self-to-self distance.
@@ -764,7 +764,20 @@ class IndirectTransition(object):
                 inner=outer
         total_prob=np.sum(prob_basket)
         if not total_prob>0.0:
-            return (False, None)
+            # Having not found a destination, we infect the next closest.
+            # This is how quarantine works in NAADSM.
+            outside_radius=-1
+            outside_dx=-1
+            for out_idx in range(len(current_distances)):
+                dx=current_distances[sort_idx[out_idx]]
+                if dx>uniform_max and dx<outside_dx:
+                    outside_dx=dx
+                    outside_radius=sort_idx[out_idx]
+            if outside_radius is not -1:
+                self.prob_basket=np.ones((1.0,), dtype=np.double)
+                return (True, gspn.ExponentialDistribution(self.rate, now))
+            else:
+                return (False, None)
         self.prob_basket=prob_basket/total_prob
         self.overall_rate=self.rate
         return (True, gspn.ExponentialDistribution(self.overall_rate, now))
@@ -821,8 +834,9 @@ class IndirectModel(object):
         pass
 
     def write_transitions(self, writer):
+        rate=self.movement_rate*self.probability_infect
         t=IndirectTransition(self.landscape, self.farm_models, self.source_farm,
-                self.source_idx, self.movement_rate, self.distance_pdf)
+                self.source_idx, rate, self.distance_pdf)
         writer.add_transition(t)
 
     def __str__(self):

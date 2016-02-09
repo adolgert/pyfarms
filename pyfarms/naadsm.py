@@ -9,7 +9,7 @@ Options:
   -q              Quiet.
   --runs=CNT      How many trajectories to gather. [default: 1]
   --stream=STREAM The integer number of the random number stream. [default: 1]
-  --out=OUT       Name of an output file. [default: out.hdf5]
+  --out=OUT       Name of an output file. [default: out.h5]
   --chunk=CHUNK   How many runs to do before saving intermediate results.
 """
 import sys
@@ -19,6 +19,7 @@ import re
 import xml.etree.ElementTree as etree
 import xml.parsers.expat.errors
 import logging
+import uuid
 import numpy as np
 import docopt
 import randomstate
@@ -97,6 +98,7 @@ class StateObserver(object):
     def __init__(self):
         self.events=list()
         self.runs=list()
+        self.seen_transitions=set()
 
     def init(self):
         if self.events:
@@ -115,6 +117,7 @@ class StateObserver(object):
 
     def __call__(self, transition, when):
         tname=transition.__class__.__name__
+        self.seen_transitions.add(tname)
         if tname=="DiseaseABTransition":
             tid=_transition_id[(transition.a, transition.b)]
             whom=transition.farm[0].name
@@ -141,6 +144,7 @@ class StateObserver(object):
             whom=who
         else:
             logger.error("Unknown transition {0}".format(tname))
+            sys.exit(3)
 
         logger.info((tid, who, whom, when))
         self.events.append((tid, int(who), int(whom), when))
@@ -222,6 +226,7 @@ def multirun(scfile, hfile, runs, stream):
     net, scenario, initial, monitors=load_naadsm_scenario(scfile, hfile)
     observer=StateObserver()
     mainloop(net, scenario, initial, observer, runs, stream)
+    logger.info("Seen transitions: {0}".format(observer.seen_transitions))
     return observer.results(), stream
 
 
@@ -253,7 +258,7 @@ def load_naadsm():
         outfile=arguments["--out"]
         outfile=re.sub("^\~", os.environ["HOME"], outfile)
     else:
-        outfile="out.hdf5"
+        outfile="out.h5"
 
     if arguments["--chunk"]:
         chunk_size=int(arguments["--chunk"])
@@ -266,8 +271,9 @@ def load_naadsm():
     hfile=util.check_filename(arguments["--herd"], "herd file")
 
     metadata.update({"run_cnt" : runs, "stream_idx" : stream,
-        "datafile" : outfile, "chunk_size" : chunk_size,
-        "herd" : hfile, "scenario" : scfile })
+        "chunk_size" : chunk_size, "naadsm_args" : str(arguments),
+        "herd" : hfile, "scenario" : scfile ,
+        "uuid" : str(uuid.uuid4()) })
 
     for chunk_idx, run_cnt in util.ChunkIter(runs, chunk_size):
         results, stream=multirun(scfile, hfile, run_cnt, stream+chunk_size)

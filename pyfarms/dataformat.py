@@ -1,4 +1,5 @@
 import logging
+import collections
 import os.path
 import numpy as np
 import h5py
@@ -33,6 +34,16 @@ def save_single_run(traj_dir, dset_idx, run, metadata):
     for k, v in metadata.items():
         group.attrs[k]=v
 
+def trajectory_iter(h5stream, limit=None):
+    traj_dir=h5stream.file["/trajectory"]
+    idx=0
+    for name in traj_dir:
+        if name.startswith("dset") or name.startswith("run"):
+            yield traj_dir[name]
+            idx+=1
+            if limit and idx>limit:
+                break
+
 
 def save_runs(outfilename, runs, metadata):
     """
@@ -63,3 +74,17 @@ def clear_datafile(outfilename):
         os.remove(outfilename)
     except Exception as e:
         raise RuntimeError("Could not write to {0} {1}".format(outfilename, e))
+
+
+def infection_time(h5filename):
+    infection_times=collections.defaultdict(list)
+    with h5py.File(h5filename, "r") as h5stream:
+        for trajectory in trajectory_iter(h5stream):
+            events=trajectory["Event"]
+            who=trajectory["Who"]
+            whom=trajectory["Whom"]
+            when=trajectory["When"]
+            for idx in range(events.shape[0]):
+                if events[idx]==0:
+                    infection_times[whom[idx]].append(when[idx])
+    return infection_times

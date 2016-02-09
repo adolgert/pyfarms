@@ -1,11 +1,48 @@
 import os
 import os.path
 import re
+import subprocess
+import datetime
+import sys
 import glob
 import logging
 import numpy as np
 
-logger=logging.getLogger("pyframs.util")
+logger=logging.getLogger("pyfarms.util")
+
+
+def gitinfo():
+    try:
+        git_ret=subprocess.Popen(['git','log','--pretty=%H','HEAD^..HEAD'],
+            stdout=subprocess.PIPE)
+        git_hash = git_ret.communicate()[0]
+    except Exception as e:
+        print(e)
+        return None
+    if git_hash:
+        git_hash=git_hash.strip().decode()
+        try:
+            url_ret=subprocess.Popen(['git','remote','show','origin'],
+                stdout=subprocess.PIPE)
+            remote=url_ret.communicate()[0].decode()
+        except Exception as e:
+            return None
+        match=re.search('URL:\s*(\S+)\n',remote)
+        if match:
+            git_url=match.group(1)
+            scmversion='{0}:{1}'.format(git_url, git_hash)
+        else:
+            scmversion=git_hash
+        return scmversion
+    else:
+        return None
+
+def makefile():
+    return open("Makefile").read()
+
+
+def when():
+    return datetime.datetime.now().isoformat()
 
 def effectively_readable(path):
     import os, stat
