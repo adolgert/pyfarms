@@ -725,8 +725,8 @@ class InfectNeighborModel(object):
         inm.distance=distance
         return inm
 
-    def from_naadsm_file(self, root, ns):
-        # This is for the exponential model.
+    def from_naadsm_file(self, root, airborne, ns):
+        self.airborne_kind=airborne
         self.p=float(root.find("prob-spread-1km", ns).text)
         wind=root.find("wind-direction-start", ns)
         self.wind_angle_begin=float(wind.find("value").text)
@@ -739,17 +739,22 @@ class InfectNeighborModel(object):
             self.max_spread=float(max_spread.find("value").text)
         delay=root.find("delay", ns)
         self.pdf=read_naadsm_pdf(delay, ns)
-        self.hazard=lambda dx: np.power(self.p, dx)
+        if self.airborne_kind=="airborne-spread-exponential-model":
+            self.hazard=lambda dx: np.power(self.p, dx)
+        elif self.airborne_kind=="airborne-spread-model":
+            assert(self.max_spread<float("inf"))
+            self.hazard=lambda dx: self.p*(self.max_spread-dx)/(self.max_spread-1)
 
     def write_places(self, writer):
         pass
 
     def write_transitions(self, writer):
-        #logger.debug("InfectNeighbor dx {0}".format(self.distance))
         if self.distance > self.max_spread:
             return
         base=self.hazard(self.distance)
         rate=base*self.special[self.farma.size]*self.special[self.farmb.size]
+        logger.debug("InfectNeighbor dx {0} rate {1} special {2}".format(
+                self.distance, rate, rate/base))
         writer.add_transition(InfectTransition((self.farma, self.farmb),
             self.farma.infectious_intensity(), self.farmb.infection_partial(),
             rate))
@@ -760,6 +765,12 @@ class InfectNeighborModel(object):
         and maybe more. It's some way to account for size of herds
         affecting spread. It's a kind of rescaling.
         """
+        # This uses C code to replicate the herd size calculation for this
+        # set of units. These are official values.
+        # s=[1, 3, 13, 7, 10, 7, 5, 2, 10, 12, 2510, 100530, 285310, 567290, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000]
+        # y=[0.0153846, 0.0769231, 0.292308, 0.153846, 0.215385, 0.153846, 0.107692, 0.0461538, 0.215385, 0.261538, 0.323077, 1.92308, 1.95385, 1.98462, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308]
+        # return { a : b for (a,b) in zip(s,y)}
+
         special_factor=2 # Comes from NAADSM
         histogram=collections.defaultdict(int)
         for p in premises:
@@ -1231,7 +1242,7 @@ class Scenario(object):
                 from_production=neighbor_model.attrib["from-production-type"]
                 to_production=neighbor_model.attrib["to-production-type"]
                 im=InfectNeighborModel()
-                im.from_naadsm_file(neighbor_model, ns)
+                im.from_naadsm_file(neighbor_model, airborne, ns)
                 self.spread_models[(from_production, to_production)]=im
         logger.debug("Spread models for {0}".format(self.spread_models.keys()))
 

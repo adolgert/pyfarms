@@ -77,7 +77,9 @@ def clear_datafile(outfilename):
 
 
 def infection_time(h5filename):
+    infect_id=set([0, 5, 6])
     infection_times=collections.defaultdict(list)
+    trajectory_cnt=0
     with h5py.File(h5filename, "r") as h5stream:
         for trajectory in trajectory_iter(h5stream):
             events=trajectory["Event"]
@@ -85,9 +87,10 @@ def infection_time(h5filename):
             whom=trajectory["Whom"]
             when=trajectory["When"]
             for idx in range(events.shape[0]):
-                if events[idx]==0:
+                if events[idx] in infect_id:
                     infection_times[whom[idx]].append(when[idx])
-    return infection_times
+            trajectory_cnt+=1
+    return infection_times, trajectory_cnt
 
 
 def first_of_event(h5filename, event_id):
@@ -109,3 +112,18 @@ def first_of_event(h5filename, event_id):
             else:
                 none_detected+=1
     return detection_times, none_detected
+
+
+def causal_infection(h5filename, event_id):
+    event=collections.defaultdict(int)
+    none_detected=0
+    with h5py.File(h5filename, "r") as h5stream:
+        for trajectory in trajectory_iter(h5stream):
+            events=trajectory["Event"]
+            who=trajectory["Who"]
+            whom=trajectory["Whom"]
+            when=trajectory["When"]
+            for idx in range(events.shape[0]):
+                if events[idx]==event_id:
+                    event[(who[idx], whom[idx])]+=1
+    return event
