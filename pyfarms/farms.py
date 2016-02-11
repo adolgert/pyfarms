@@ -2,6 +2,7 @@ import logging
 import itertools
 import collections
 import copy
+import io
 #from enum import Enum
 import numpy as np
 import numbers
@@ -324,7 +325,7 @@ class DetectionTransition(object):
         is a product of hazards from the two that are given,
         displaced by now.
         """
-        logger.debug("combine_relational t0 {0} now {1}".format(t0, now))
+        # logger.debug("combine_relational t0 {0} now {1}".format(t0, now))
         assert(t0<=now)
         assert(t1 is None or t1<=now)
 
@@ -445,7 +446,7 @@ class QuarantinePlace(object):
 
 class QuarantineTransition(object):
     def __init__(self, model):
-        logger.debug("Quarantine transition create")
+        # logger.debug("Quarantine transition create")
         self.model=model
         self.farm=(model.farm,)
         self.detectable=model.farm.detection.is_detected()
@@ -690,8 +691,8 @@ class InfectTransition(object):
         intensity=self.intensity.intensity(now)
         action_enabled=self.action.enabled(now)
         if intensity is not None and action_enabled:
-            logger.debug("InfectNeighbor rate {0} intensity {1} action {2}".format(
-                     self.rate, intensity, action_enabled))
+            # logger.debug("InfectNeighbor rate {0} intensity {1} action {2}".format(
+            #          self.rate, intensity, action_enabled))
             return (True, gspn.ExponentialDistribution(self.rate, now))
         else:
             return (False, None)
@@ -737,6 +738,8 @@ class InfectNeighborModel(object):
             self.max_spread=float("inf")
         else:
             self.max_spread=float(max_spread.find("value").text)
+            # self.max_spread=15
+            # logger.info("Max spread is fixed at {0}".format(self.max_spread))
         delay=root.find("delay", ns)
         self.pdf=read_naadsm_pdf(delay, ns)
         if self.airborne_kind=="airborne-spread-exponential-model":
@@ -751,13 +754,23 @@ class InfectNeighborModel(object):
     def write_transitions(self, writer):
         if self.distance > self.max_spread:
             return
-        base=self.hazard(self.distance)
+        if self.airborne_kind=="airborne-spread-exponential-model":
+            base=np.power(self.p, self.distance)
+        elif self.airborne_kind=="airborne-spread-model":
+            assert(self.max_spread<float("inf"))
+            base=self.p*(self.max_spread-self.distance)/(self.max_spread-1)
+        # base=self.hazard(self.distance)
         rate=base*self.special[self.farma.size]*self.special[self.farmb.size]
-        logger.debug("InfectNeighbor dx {0} rate {1} special {2}".format(
-                self.distance, rate, rate/base))
+        # logger.debug("InfectNeighbor dx {0} rate {1} special {2}".format(
+        #         self.distance, rate, rate/base))
         writer.add_transition(InfectTransition((self.farma, self.farmb),
             self.farma.infectious_intensity(), self.farmb.infection_partial(),
             rate))
+
+    def __str__(self):
+        s=("InfectNeighborModel({airborne_kind} prob-spread-1km {p} "+
+            "max-spread {max_spread}")
+        return s.format(**self.__dict__)
 
     def herd_factor(self, premises):
         """
@@ -770,6 +783,7 @@ class InfectNeighborModel(object):
         # s=[1, 3, 13, 7, 10, 7, 5, 2, 10, 12, 2510, 100530, 285310, 567290, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000, 36000]
         # y=[0.0153846, 0.0769231, 0.292308, 0.153846, 0.215385, 0.153846, 0.107692, 0.0461538, 0.215385, 0.261538, 0.323077, 1.92308, 1.95385, 1.98462, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308, 1.12308]
         # return { a : b for (a,b) in zip(s,y)}
+        # The relative error in the calculation below is under 10^-6, so perfect.
 
         special_factor=2 # Comes from NAADSM
         histogram=collections.defaultdict(int)
@@ -788,6 +802,7 @@ class InfectNeighborModel(object):
             previous=val
         logger.debug("Creating herd special factor {0}".format(factor_dict))
         return factor_dict
+
 
 ##############################################################
 # Indirect Contact
@@ -1109,10 +1124,28 @@ class Landscape(object):
         return l
 
     def _build(self):
-        self.farm_locations=np.array([x.latlon for x in self.premises],
+        farm_latlon=np.array([x.latlon for x in self.premises],
                 dtype=np.double)
-        self.distances=distance.squareform(
-            distance.pdist(self.farm_locations, util.distancekm))
+        # This is just to replicate NAADSM. Projection is unimportant.
+        # Only distance is important, and it's easily calculated from
+        # lonlat.
+        use_projection=True
+        if use_projection:
+            self.farm_locations=util.GIS_default_projection(farm_latlon)
+            for lidx, p in enumerate(self.premises):
+                p.latlon=self.farm_locations[lidx]
+            distance_func=util.GIS_distance
+            self.distances=distance.squareform(
+                distance.pdist(self.farm_locations, distance_func))
+        else:
+            distance_func=util.distancekm
+            distances2=distance.squareform(
+                distance.pdist(self.farm_locations, distance_func))
+        # max_error=-1
+        # for (i,j) in itertools.combinations(range(len(self.premises)),2):
+        #     if i<j:
+        #         max_error=max(abs(self.distances[i,j]-distances2[i,j]), max_error)
+        # logger.debug("Maximum difference in distances is {0}".format(max_error))
         logger.debug("found {0} premises".format(len(self.premises)))
 
 
@@ -1273,7 +1306,12 @@ class Scenario(object):
 
         self.models_loaded=True
 
-
+    def __str__(self):
+        out=io.StringIO()
+        out.write("Airborne\n")
+        for k, v in self.spread_models.items():
+            out.write("airborne {0} {1}\n".format(k, str(v)))
+        return out.getvalue()
 
 def Build(scenario, landscape):
     net=gspn.LLCP()

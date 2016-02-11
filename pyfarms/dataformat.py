@@ -1,6 +1,7 @@
 import logging
 import collections
 import os.path
+import sys
 import numpy as np
 import h5py
 from pyfarms.gracefulinterrupthandler import GracefulInterruptHandler
@@ -86,9 +87,14 @@ def infection_time(h5filename):
             who=trajectory["Who"]
             whom=trajectory["Whom"]
             when=trajectory["When"]
+            seen=set()
             for idx in range(events.shape[0]):
                 if events[idx] in infect_id:
                     infection_times[whom[idx]].append(when[idx])
+                    if whom[idx] in seen:
+                        logger.error("Found {0} twice".format(whom[idx]))
+                        sys.exit(0)
+                    seen.add(whom[idx])
             trajectory_cnt+=1
     return infection_times, trajectory_cnt
 

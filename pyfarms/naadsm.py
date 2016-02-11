@@ -208,6 +208,7 @@ def mainloop(sxml, hxml, ns, no_direct, initial, observer, runs, stream):
         landscape.from_naadsm_file(hxml, ns)
         scenario=farms.Scenario()
         scenario.from_naadsm_file(sxml, ns)
+        logger.debug("Scenario {0}".format(scenario))
         if no_direct:
             scenario.disable_indirect()
         net=farms.Build(scenario, landscape)

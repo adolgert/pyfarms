@@ -5,8 +5,10 @@ import subprocess
 import datetime
 import sys
 import glob
+import math
 import logging
 import numpy as np
+import pyproj
 
 logger=logging.getLogger("pyfarms.util")
 
@@ -122,6 +124,37 @@ def distancekm(latlon1, latlon2):
     return _radians_km*(2*np.arcsin(np.sqrt(np.power(np.sin((ll1[0]-ll2[0])/2),2)+
         np.cos(ll1[0])*np.cos(ll2[0])*np.power(np.sin((ll1[1]-ll2[1])/2), 2))))
 
+def GIS_default_projection(latlon):
+    """
+    Given an array of latitude and longitude, return the same projection
+    NAADSM uses.
+    """
+    minlat=np.min(latlon[:,0])
+    maxlat=np.max(latlon[:,0])
+    avglat=np.mean(latlon[:,0])
+    minlon=np.min(latlon[:,1])
+    maxlon=np.max(latlon[:,1])
+    avglon=np.mean(latlon[:,1])
+
+    projstr="+ellps=WGS84 +units=km +lon_0={0} +proj=aea +lat_0={1} +lat_1={2} +lat_2={3}".format(
+        avglon, minlat, minlat+(maxlat-minlat)/6, maxlat-(maxlat-minlat)/6)
+    logger.debug("Projection string {0}".format(projstr))
+    pp=pyproj.Proj(projstr)
+    projected=np.zeros(latlon.shape, dtype=np.double)
+    for idx in range(latlon.shape[0]):
+        projected[idx,:]=np.array(pp(latlon[idx,1], latlon[idx,0]))/1000
+    logger.debug("latlon {0}".format(latlon))
+    logger.debug("Projected GIS {0}".format(projected))
+    return projected
+
+def GIS_distance(latlon1, latlon2):
+    """
+    This function, named GIS_distance in NAADSM 3.2, is exactly the same.
+    Not kidding.
+    """
+    x=latlon1[0]-latlon2[0]
+    y=latlon1[1]-latlon2[1]
+    return math.sqrt(x*x + y*y)
 
 class ChunkIter(object):
     """

@@ -6,7 +6,7 @@ Usage:
     plot.py [-v] [-q] infect <filename1> <filename2>
     plot.py [-v] [-q] detect <filename1>
     plot.py [-v] [-q] quarantine <filename1>
-    plot.py [-v] [-q] locations <filename1>
+    plot.py [-v] [-q] locations <filename1> [--cutoff=<cutoff>]
 
 Options:
     -h --help             Print this screen.
@@ -20,6 +20,7 @@ import docopt
 import shutil
 import os
 import itertools
+import math
 import tempfile
 import numpy as np
 import matplotlib
@@ -77,11 +78,12 @@ def normalize_name(title):
 
 def plot_unit_survival(kmf, ax, fired, fired_max, when_max, name):
     if len(fired)<fired_max:
-        fired=fired+ ([when_max]*(fired_max-len(fired)))
         P=[1]*len(fired) + [0]*(fired_max-len(fired))
+        ftoplot=fired+([when_max]*(fired_max-len(fired)))
     else:
         P=[1]*len(fired)
-    kmf.fit(fired, P, label=name)
+        ftoplot=fired
+    kmf.fit(ftoplot, P, label=name)
     if ax:
         ay=kmf.plot(ax=ax)
     else:
@@ -126,6 +128,7 @@ def plot_infect(filenames, md):
         fired_max=max(fired_max, len(events))
         when_max=max(when_max, max(events))
 
+    # a last event much later that ends the simulation.
     for unit in sorted(units):
         inf0=infection_times0[unit]
         inf1=infection_times1[unit]
@@ -133,6 +136,20 @@ def plot_infect(filenames, md):
                 traj_cnt0, traj_cnt1, when_max, md)
 
     # Now make a bubble plot.
+    just_sizes0=[len(x) for x in infection_times0.values()]
+    largest=[max(just_sizes0)]
+    smallest=[min(just_sizes0)]
+    just_sizes1=[len(x) for x in infection_times1.values()]
+    largest.append(max(just_sizes1))
+    smallest.append(min(just_sizes1))
+
+    print("Trajectory counts for 0 {0} 1 {1}".format(traj_cnt0, traj_cnt1))
+    print("unit, times0 times1 percent0 percent1")
+    for sunit in sorted(units):
+        print("{0} {1} {2} {3} {4}".format(sunit, len(infection_times0[sunit]),
+            len(infection_times1[sunit]), len(infection_times0[sunit])/traj_cnt0,
+            len(infection_times1[sunit])/traj_cnt1))
+
     landscape=locations_from_filename(filenames[0])
     x=list()
     y=list()
@@ -141,12 +158,10 @@ def plot_infect(filenames, md):
     size=list()
     events=list()
     for farm_name in units:
-        events.append((farm_name-1, len(infection_times0[farm_name]), 0))
-        events.append((farm_name-1, len(infection_times1[farm_name]), 1))
-    just_sizes=[x[1] for x in events]
-    logger.debug("sizes {0}".format(just_sizes))
-    largest=max(just_sizes)
-    smallest=min(just_sizes)
+        events.append((farm_name-1,
+                len(infection_times0[farm_name])/traj_cnt0, 0))
+        events.append((farm_name-1,
+                len(infection_times1[farm_name])/traj_cnt1, 1))
     # sort by inverse size, so print large ones first.
     events.sort(key=lambda x: -x[1])
     logger.debug("sorted events {0}".format(events))
@@ -155,7 +170,7 @@ def plot_infect(filenames, md):
         x.append(loc[1])
         y.append(loc[0])
         color.append(colors[who])
-        size.append(3.14*(10*big/largest)**2)
+        size.append(3.14*(10*big)**2)
 
     fig=plt.figure(1)
     ax=fig.add_subplot(111)
@@ -201,7 +216,7 @@ def locations_from_filename(filename):
     return landscape
 
 
-def plot_locations(filename, md):
+def plot_locations(filename, color_cutoff, md):
     landscape=locations_from_filename(filename)
     for idx, farm in enumerate(landscape.premises):
         if int(farm.name) == 21:
@@ -241,8 +256,15 @@ def plot_locations(filename, md):
     for (i, j, t) in totals:
         x0, y0=locations[idxof[i]]
         x1, y1=locations[idxof[j]]
-        plt.plot([y0, y1], [x0, x1],
-            color=plt.cm.gray(1-t/maximum))
+        dx=x0-x1
+        dy=y0-y1
+        if math.sqrt(dx*dx+dy*dy)<color_cutoff:
+            plt.plot([y0, y1], [x0, x1],
+                color=plt.cm.gray(1-t/maximum))
+        else:
+            if t>0:
+                plt.plot([y0, y1], [x0, x1],
+                    color=plt.cm.autumn(1-t/maximum))
     SaveFig("connectivity.pdf", md)
     plt.clf()
 
@@ -286,4 +308,8 @@ if __name__ == "__main__":
         plot_detect(arguments["<filename1>"], "Quarantine", 11, md)
 
     if arguments["locations"]:
-        plot_locations(arguments["<filename1>"], md)
+        if arguments["--cutoff"]:
+            color_cutoff=float(arguments["--cutoff"])
+        else:
+            color_cutoff=float("inf")
+        plot_locations(arguments["<filename1>"], color_cutoff, md)
