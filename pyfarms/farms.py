@@ -262,10 +262,13 @@ class DetectionTransition(object):
     This is detection and reporting, so it's the act of reporting.
     One farm sets its detection to true and tells the global one.
     """
-    def __init__(self, model):
+    def __init__(self, model, since_outbreak, since_clinical):
         self.te=None
         self.model=model
         self.farm=(model.farm,)
+        self.outbreak=since_outbreak
+        self.clinical=since_clinical
+
     def depends(self):
         dep=[self.model.place]
         dep.extend(self.detectable.depends())
@@ -273,14 +276,17 @@ class DetectionTransition(object):
         for o in self.observers:
             dep.extend(o.depends())
         return dep
+
     def affected(self):
         a=[self.model.place]
         for o in self.observers:
             a.extend(o.affected())
         return a
+
     def enabled(self, now):
         # self.detectable is whether the disease is detectable.
-        if ((self.detectable.intensity(now) is not None)
+        when_infected=self.detectable.intensity(now)
+        if ((when_infected is not None)
                 and (not self.model.place.reported)):
             # If and when was the first observation?
             # This will be None or it will be a time.
@@ -288,16 +294,84 @@ class DetectionTransition(object):
 
             if self.te is not None:
                 now=self.te
-            return (True, gspn.ExponentialDistribution(4, now))
+            x, y=self._combine_relational(self.clinical, when_infected,
+                    self.outbreak, first_observation, now)
+            return (True, gspn.PiecewiseLinearDistribution(x, y, now))
         else:
             self.te=None
             return (None, None)
+
     def fire(self, now, rng):
         logger.debug("DetectionTransition fire {0}".format(id(self.model.place)))
         self.model.place.reported=True
         self.te=None
         for observer in self.observers:
             observer.fire(now, rng)
+
+    def _combine_relational(self, r0, t0, r1, t1, now):
+        """
+        r0 is (t, h) where h are hazards for one distribution.
+        t0 is the absolute time at which to start that clock.
+
+        r1 is (t, h) where h are hazards for one distribution.
+        t1 is the absolute time at which to start that clock.
+        now is the current time.
+        Because r1 represents time since first observation globally,
+        if t1 is None, then we use the first entry of r1 as a
+        fixed probability of reporting.
+
+        We want to return a (t, h) where, t starts at 0, and h
+        is a product of hazards from the two that are given,
+        displaced by now.
+        """
+        logger.debug("combine_relational t0 {0} now {1}".format(t0, now))
+        assert(t0<=now)
+        assert(t1 is None or t1<=now)
+
+        x0, y0=r0
+        x1, y1=r1
+
+        # Special case where global detection hasn't happened yet.
+        if t1 is None:
+            t1=t0
+            x1=[t0]
+            y1=[y1[0]]
+
+        absx=[(x+t0, 0, i) for (i, x) in enumerate(x0)]
+        absx.extend([(x+t1, 1, i) for (i, x) in enumerate(x1)])
+        y=[y0, y1]
+
+        xx=list()
+        yy=list()
+        hazards=[0.0, 0.0]
+        for t, j, i in sorted(absx, key=lambda x: x[0]):
+            if not xx or t!=xx[-1]:
+                xx.append(t)
+                hazards[j]=y[j][i]
+                yy.append(hazards[0]*hazards[1])
+            else:
+                hazards[j]=y[j][i]
+                yy[-1]=(hazards[0]*hazards[1])
+
+        xl=[x for x in xx if x<=now]
+        xend=len(xl)-1
+        xx=xx[xend:]
+        yy=yy[xend:]
+        xx[0]=now
+
+        return ([x-now for x in xx], yy)
+
+    def _test_combine_relational(self):
+        x0=[0, 1, 2]
+        y0=[0.01, 0.5, 0.75]
+        x1=[0, 2, 4]
+        y1=[0.1, 0.5, 1.0]
+
+        versions=[(0, 0, 0), (0, None, 0), (0, 0, 20),
+            (1, 1, 1), (2, 1, 3)]
+        for a, b, c in versions:
+            print(_combine_relational((x0, y0), a, (x1, y1), b, c))
+
 
 class DetectedIntensity(object):
     def __init__(self, model):
@@ -313,6 +387,7 @@ class DetectionModel(object):
     def __init__(self, global_model):
         self.farm=None
         self.global_model=global_model
+
     def __str__(self):
         if self.farm is None:
             return "DetectionModel({0}, {1}, {2})".format(
@@ -321,6 +396,7 @@ class DetectionModel(object):
             return "DetectionModel({0}, {1}, {2}, {3}, {4})".format(
                 self.farm.name, id(self.place), id(self.global_model),
                 self.detect, self.report)
+
     def from_naadsm_file(self, detect_model, ns):
         clinobs=detect_model.find("prob-report-vs-time-clinical", ns)
         clinobs_rel=clinobs.find("relational-function")
@@ -336,6 +412,7 @@ class DetectionModel(object):
         dm.place=DetectionPlace()
         dm.observers=list([self.global_model.on_detect()])
         return dm
+
     def is_detected(self):
         return DetectedIntensity(self)
 
@@ -345,11 +422,12 @@ class DetectionModel(object):
         they fire, have dependencies, and have affected places.
         """
         self.observers.append(observer)
+
     def write_places(self, writer):
         writer.add_place(self.place)
 
     def write_transitions(self, writer):
-        dt=DetectionTransition(self)
+        dt=DetectionTransition(self, self.report, self.detect)
         dt.observers=self.observers
         dt.detectable=self.farm.detectable_intensity()
         dt.global_intensity=self.global_model.when_detected()
@@ -610,9 +688,11 @@ class InfectTransition(object):
 
     def enabled(self, now):
         intensity=self.intensity.intensity(now)
-        if intensity is not None and self.action.enabled(now):
-            rate=0.5*intensity
-            return (True, gspn.ExponentialDistribution(rate, now))
+        action_enabled=self.action.enabled(now)
+        if intensity is not None and action_enabled:
+            logger.debug("InfectNeighbor rate {0} intensity {1} action {2}".format(
+                     self.rate, intensity, action_enabled))
+            return (True, gspn.ExponentialDistribution(self.rate, now))
         else:
             return (False, None)
 
@@ -646,12 +726,17 @@ class InfectNeighborModel(object):
         return inm
 
     def from_naadsm_file(self, root, ns):
-        # This is for the exponenital model.
+        # This is for the exponential model.
         self.p=float(root.find("prob-spread-1km", ns).text)
         wind=root.find("wind-direction-start", ns)
         self.wind_angle_begin=float(wind.find("value").text)
         wind=root.find("wind-direction-end", ns)
         self.wind_angle_end=float(wind.find("value").text)
+        max_spread=root.find("max-spread", ns)
+        if not max_spread:
+            self.max_spread=float("inf")
+        else:
+            self.max_spread=float(max_spread.find("value").text)
         delay=root.find("delay", ns)
         self.pdf=read_naadsm_pdf(delay, ns)
         self.hazard=lambda dx: np.power(self.p, dx)
@@ -660,6 +745,9 @@ class InfectNeighborModel(object):
         pass
 
     def write_transitions(self, writer):
+        #logger.debug("InfectNeighbor dx {0}".format(self.distance))
+        if self.distance > self.max_spread:
+            return
         base=self.hazard(self.distance)
         rate=base*self.special[self.farma.size]*self.special[self.farmb.size]
         writer.add_transition(InfectTransition((self.farma, self.farmb),
@@ -779,8 +867,7 @@ class IndirectTransition(object):
             else:
                 return (False, None)
         self.prob_basket=prob_basket/total_prob
-        self.overall_rate=self.rate
-        return (True, gspn.ExponentialDistribution(self.overall_rate, now))
+        return (True, gspn.ExponentialDistribution(self.rate, now))
 
     def fire(self, now, rng):
         try:
@@ -1024,6 +1111,11 @@ class Scenario(object):
     """
     def __init__(self):
         self.models_loaded=False
+        self.use_indirect=True
+
+    def disable_indirect(self):
+        self.use_indirect=False
+        logger.info("Disabling indirect and direct contact.")
 
     def build_from_landscape(self, landscape):
         """
@@ -1049,14 +1141,15 @@ class Scenario(object):
                 from_type=landscape.premises[aidx].production_type
                 to_type=landscape.premises[bidx].production_type
                 dx=landscape.distances[aidx, bidx]
-                air_model=self.spread_models[(from_type, to_type)].clone(a, b, dx)
+                air_model=self.spread_models[(from_type, to_type)].clone(
+                        a, b, dx)
                 self.airborne.append(air_model)
         else:
             self.airborne=list()
 
         ### Indirect and Direct Contact
         self.indirect=list()
-        if len(self.contact_models)>0:
+        if len(self.contact_models)>0 and self.use_indirect:
             for ind_idx in range(len(self.farms)):
                 f=self.farms[ind_idx]
                 p=landscape.premises[ind_idx]
@@ -1132,13 +1225,15 @@ class Scenario(object):
             logger.debug(dm)
 
         self.spread_models=dict()
-        for neighbor_model in models.findall(
-                "airborne-spread-exponential-model", ns):
-            from_production=neighbor_model.attrib["from-production-type"]
-            to_production=neighbor_model.attrib["to-production-type"]
-            im=InfectNeighborModel()
-            im.from_naadsm_file(neighbor_model, ns)
-            self.spread_models[(from_production, to_production)]=im
+        for airborne in ["airborne-spread-exponential-model",
+                "airborne-spread-model"]:
+            for neighbor_model in models.findall(airborne, ns):
+                from_production=neighbor_model.attrib["from-production-type"]
+                to_production=neighbor_model.attrib["to-production-type"]
+                im=InfectNeighborModel()
+                im.from_naadsm_file(neighbor_model, ns)
+                self.spread_models[(from_production, to_production)]=im
+        logger.debug("Spread models for {0}".format(self.spread_models.keys()))
 
         self.contact_models=collections.defaultdict(list)
         for indirect_model in models.findall("contact-spread-model", ns):

@@ -4,15 +4,18 @@ Make plots from data for discrete distributions.
 
 Usage:
     plot.py [-v] [-q] infect <filename1> <filename2>
+    plot.py [-v] [-q] detect <filename1>
+    plot.py [-v] [-q] quarantine <filename1>
+    plot.py [-v] [-q] locations <filename1>
 
 Options:
     -h --help             Print this screen.
     -v                    Verbose
     -q                    Quiet
     -t                    Testing flag
-    --config=<configfile> Load this config
 """
 import logging
+import sys
 import docopt
 import shutil
 import os
@@ -29,6 +32,7 @@ import lifelines
 from PyPDF2 import PdfFileWriter, PdfFileReader
 import pyfarms.util as util
 import pyfarms.dataformat as dataformat
+import pyfarms.naadsm as naadsm
 
 logger=logging.getLogger("pyfarms.plot")
 
@@ -86,8 +90,8 @@ def plot_unit_survival(kmf, ax, fired, fired_max, when_max, name):
 
 def compare_unit_survival(infect0, infect1, unit, fired_max, when_max, md):
     kmf=lifelines.KaplanMeierFitter()
-    ax=plot_unit_survival(kmf, None, infect0, fired_max, when_max, "NAADSM")
-    plot_unit_survival(kmf, ax, infect1, fired_max, when_max, "Continuous")
+    ax=plot_unit_survival(kmf, None, infect0, fired_max, when_max, "Continuous")
+    plot_unit_survival(kmf, ax, infect1, fired_max, when_max, "NAADSM")
     SaveFig("unit_survival{0}.pdf".format(unit), md)
     plt.clf()
     plt.close()
@@ -102,7 +106,9 @@ def plot_infect(filenames, md):
     that means that, for some runs, that unit doesn't get infected.
     """
     infection_times0=dataformat.infection_time(filenames[0])
-    infection_times1=dataformat.infection_time(filenames[1])
+    # The NAADSM output is numbered from 0.
+    in1=dataformat.infection_time(filenames[1])
+    infection_times1={n+1 : v for (n,v) in in1.items()}
     logger.debug(infection_times0.keys())
     logger.debug(infection_times1.keys())
     unitsa=set([int(x) for x in infection_times0.keys()])
@@ -124,6 +130,33 @@ def plot_infect(filenames, md):
         compare_unit_survival(inf0, inf1, unit, fired_max, when_max, md)
 
 
+def plot_detect(filename, name, event_id, md):
+    """
+    What is the distribution of times that infection is first detected.
+    """
+    detection_times, none_detected=dataformat.first_of_event(filename, event_id)
+    logger.info("Detected {0} times out of {1}".format(len(detection_times),
+            len(detection_times)+none_detected))
+    if len(detection_times) is 0:
+        logger.info("The event {0} did not happen.".format(event_id))
+        sys.exit(0)
+    kmf=lifelines.KaplanMeierFitter()
+    last=max(detection_times)+1
+    detection=np.hstack([np.array(detection_times),
+            last*np.ones((none_detected,), dtype=np.double)])
+    P=[1]*len(detection_times)+[0]*none_detected
+    kmf.fit(detection, P, label=name)
+    kmf.plot()
+    SaveFig("{0}_survival.pdf".format(name), md)
+    plt.clf()
+    plt.close()
+
+
+def plot_locations(filename, md):
+    pass
+
+
+
 if __name__ == "__main__":
     arguments = docopt(__doc__, version="pyfarms.plot 1.0")
     if arguments["-v"]:
@@ -141,3 +174,11 @@ if __name__ == "__main__":
     if arguments["infect"]:
         plot_infect([arguments["<filename1>"], arguments["<filename2>"]], md)
 
+    if arguments["detect"]:
+        plot_detect(arguments["<filename1>"], "Detection", 10, md)
+
+    if arguments["quarantine"]:
+        plot_detect(arguments["<filename1>"], "Quarantine", 11, md)
+
+    if arguments["locations"]:
+        plot_locations(arguments["<filename1>"], md)

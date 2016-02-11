@@ -20,7 +20,7 @@ def next_dset(openh5):
 
 
 def save_single_run(traj_dir, dset_idx, run, metadata):
-    grp_name="run{0:0>4d}".format(dset_idx)
+    grp_name="dset{0:0>4d}".format(dset_idx)
     group=traj_dir.create_group(grp_name)
     event_cnt=len(run["what"])
     event=group.create_dataset("Event", (event_cnt,),
@@ -88,3 +88,24 @@ def infection_time(h5filename):
                 if events[idx]==0:
                     infection_times[whom[idx]].append(when[idx])
     return infection_times
+
+
+def first_of_event(h5filename, event_id):
+    detection_times=list()
+    none_detected=0
+    with h5py.File(h5filename, "r") as h5stream:
+        for trajectory in trajectory_iter(h5stream):
+            events=trajectory["Event"]
+            who=trajectory["Who"]
+            whom=trajectory["Whom"]
+            when=trajectory["When"]
+            first=None
+            for idx in range(events.shape[0]):
+                if events[idx]==event_id:
+                    first=when[idx]
+                    break
+            if first:
+                detection_times.append(first)
+            else:
+                none_detected+=1
+    return detection_times, none_detected

@@ -11,6 +11,7 @@ Options:
   --stream=STREAM The integer number of the random number stream. [default: 1]
   --out=OUT       Name of an output file. [default: out.h5]
   --chunk=CHUNK   How many runs to do before saving intermediate results.
+  --nodirect      Disable direct and indirect
 """
 import sys
 import os
@@ -189,16 +190,6 @@ def load_naadsm_scenario(scenario_filename, herd_filename):
             xml.parsers.expat.errors.messages[err.code]))
         sys.exit(1)
     
-    landscape=farms.Landscape()
-    landscape.from_naadsm_file(hxml, ns)
-
-    scenario=farms.Scenario()
-    scenario.from_naadsm_file(sxml, ns)
-
-    # Turn off all airborne spread.
-    #scenario.spread_models.clear()
-
-    net=farms.Build(scenario, landscape)
 
     initial=InitialConditionsNAADSM()
     initial.from_naadsm_file(hxml, ns)
@@ -206,13 +197,21 @@ def load_naadsm_scenario(scenario_filename, herd_filename):
     monitors=Monitors()
     monitors.from_naadsm_file(sxml, ns)
 
-    return net, scenario, initial, monitors
+    return sxml, hxml, ns, initial, monitors
 
 
-def mainloop(net, scenario, initial, observer, runs, stream):
+def mainloop(sxml, hxml, ns, no_direct, initial, observer, runs, stream):
     rng=randomstate.prng.pcg64.RandomState(seed=3333334, inc=stream)
     for run_idx in range(runs):
         logger.debug("mainloop run {0}".format(run_idx))
+        landscape=farms.Landscape()
+        landscape.from_naadsm_file(hxml, ns)
+        scenario=farms.Scenario()
+        scenario.from_naadsm_file(sxml, ns)
+        if no_direct:
+            scenario.disable_indirect()
+        net=farms.Build(scenario, landscape)
+
         net.init()
         observer.init()
         initial.apply(scenario)
@@ -222,10 +221,10 @@ def mainloop(net, scenario, initial, observer, runs, stream):
         run.run()
 
 
-def multirun(scfile, hfile, runs, stream):
-    net, scenario, initial, monitors=load_naadsm_scenario(scfile, hfile)
+def multirun(scfile, hfile, no_direct, runs, stream):
+    sxml, hxml, ns, initial, monitors=load_naadsm_scenario(scfile, hfile)
     observer=StateObserver()
-    mainloop(net, scenario, initial, observer, runs, stream)
+    mainloop(sxml, hxml, ns, no_direct, initial, observer, runs, stream)
     logger.info("Seen transitions: {0}".format(observer.seen_transitions))
     return observer.results(), stream
 
@@ -265,6 +264,8 @@ def load_naadsm():
     else:
         chunk_size=runs
 
+    no_direct=arguments["--nodirect"]
+
     dataformat.clear_datafile(outfile)
 
     scfile=util.check_filename(arguments["--scenario"], "scenario file")
@@ -273,10 +274,11 @@ def load_naadsm():
     metadata.update({"run_cnt" : runs, "stream_idx" : stream,
         "chunk_size" : chunk_size, "naadsm_args" : str(arguments),
         "herd" : hfile, "scenario" : scfile ,
-        "uuid" : str(uuid.uuid4()) })
+        "uuid" : str(uuid.uuid4()), "executable" : "naadsm.py" })
 
     for chunk_idx, run_cnt in util.ChunkIter(runs, chunk_size):
-        results, stream=multirun(scfile, hfile, run_cnt, stream+chunk_size)
+        results, stream=multirun(scfile, hfile, no_direct,
+                run_cnt, stream+chunk_size)
         dataformat.save_runs(outfile, results, metadata)
 
 if __name__ == "__main__":
