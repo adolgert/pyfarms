@@ -80,8 +80,8 @@ class InitialConditionsNAADSM(object):
 class TransID(object):
     infected=0
     infectious=1
-    recover=4
-    wane=5
+    recover=3
+    wane=4
     detect=10
     quarantine=11
     restriction=12

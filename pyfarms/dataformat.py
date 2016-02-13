@@ -133,3 +133,34 @@ def causal_infection(h5filename, event_id):
                 if events[idx]==event_id:
                     event[(who[idx], whom[idx])]+=1
     return event
+
+
+def disease_states(h5filename, initial_unit, limit=float("inf")):
+    """
+    Returns a dictionary where keys are the transitions,
+    latclin for latent to clinical or clinrec for clinical to recovered,
+    and the value is a list of times at which the transition happened.
+    """
+    lat_clin=set([1, 5, 6, 8])
+    clin_rec=set([3,4])
+    event=collections.defaultdict(list)
+    none_detected=0
+    with h5py.File(h5filename, "r") as h5stream:
+        for trajectory in trajectory_iter(h5stream, limit):
+            events=trajectory["Event"]
+            who=trajectory["Who"]
+            whom=trajectory["Whom"]
+            when=trajectory["When"]
+            units=collections.defaultdict(int)
+            units[initial_unit]=0
+            for idx in range(events.shape[0]):
+                if events[idx] in lat_clin:
+                    if events[idx]==1 or events[idx]==8:
+                        event["latclin"].append(when[idx]-units[whom[idx]])
+                    else:
+                        event["latclin"].append(0)
+                if events[idx] in clin_rec:
+                    event["clinrec"].append(when[idx]-units[whom[idx]])
+                if whom[idx]>=0:
+                    units[whom[idx]]=when[idx]
+    return event

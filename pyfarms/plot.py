@@ -6,9 +6,10 @@ Usage:
     plot.py [-v] [-q] infect <filename1> <filename2>
     plot.py [-v] [-q] detect <filename1>
     plot.py [-v] [-q] quarantine <filename1>
-    plot.py [-v] [-q] locations <filename1> [--cutoff=<cutoff>]
+    plot.py [-v] [-q] locations <filename1> [--cutoff=CUTOFF]
+    plot.py [-v] [-q] disease <filename1> <filename2> [--runcnt=RUNCNT]
 
-Options:
+runc:
     -h --help             Print this screen.
     -v                    Verbose
     -q                    Quiet
@@ -21,6 +22,7 @@ import shutil
 import os
 import itertools
 import math
+import re
 import tempfile
 import numpy as np
 import matplotlib
@@ -58,6 +60,7 @@ def AddPdfKeys(pdf_file, keydict):
         os.remove(outstream.name)
 
 def SaveFig(pdfname, md):
+    pdfname=normalize_name(pdfname)
     logger.info("Writing {0}".format(pdfname))
     plt.savefig(pdfname)
     AddPdfKeys(pdfname, md)
@@ -198,7 +201,10 @@ def plot_detect(filename, name, event_id, md):
             last*np.ones((none_detected,), dtype=np.double)])
     P=[1]*len(detection_times)+[0]*none_detected
     kmf.fit(detection, P, label=name)
-    kmf.plot()
+    ax=kmf.plot()
+    ax.set_title(name)
+    ax.set_xlabel("Days")
+    ax.set_ylabel("Survival")
     SaveFig("{0}_survival.pdf".format(name), md)
     plt.clf()
     plt.close()
@@ -284,6 +290,36 @@ def plot_locations(filename, color_cutoff, md):
     SaveFig("locations.pdf", md)
 
 
+def disease_comparison(times0, times1, name, md):
+    logger.debug("times0 len {0} times1 len {1}".format(
+            len(times0), len(times1)))
+    plt.clf()
+    fig=plt.figure(1, figsize=(4,3))
+    ax=fig.add_subplot(111)
+    kmf=lifelines.KaplanMeierFitter()
+    logger.info("Truncating times at 50.")
+    for tidx in range(len(times0)):
+        if times0[tidx]>50:
+            times0[tidx]=50
+    P0=[1]*len(times0)
+    kmf.fit(times0, P0, label="Continuous")
+    ax=kmf.plot(ax=ax)
+    ax.set_title(name)
+    P1=[1]*len(times1)
+    kmf.fit(times1, P1, label="NAADSM")
+    kmf.plot(ax=ax)
+    plt.tight_layout()
+    SaveFig("disease_comparison{0}.pdf".format(name), md)
+
+
+def plot_disease(filenames, runcnt, md):
+    ds0=dataformat.disease_states(filenames[0], 21, runcnt)
+    ds1=dataformat.disease_states(filenames[1], 21, runcnt)
+
+    disease_comparison(ds0["latclin"], ds1["latclin"], "Latent to Clinical", md)
+    disease_comparison(ds0["clinrec"], ds1["clinrec"], "Clinical to Recovered", md)
+
+
 if __name__ == "__main__":
     arguments = docopt(__doc__, version="pyfarms.plot 1.0")
     if arguments["-v"]:
@@ -302,10 +338,10 @@ if __name__ == "__main__":
         plot_infect([arguments["<filename1>"], arguments["<filename2>"]], md)
 
     if arguments["detect"]:
-        plot_detect(arguments["<filename1>"], "Detection", 10, md)
+        plot_detect(arguments["<filename1>"], "First Detection", 10, md)
 
     if arguments["quarantine"]:
-        plot_detect(arguments["<filename1>"], "Quarantine", 11, md)
+        plot_detect(arguments["<filename1>"], "First Quarantine", 11, md)
 
     if arguments["locations"]:
         if arguments["--cutoff"]:
@@ -313,3 +349,12 @@ if __name__ == "__main__":
         else:
             color_cutoff=float("inf")
         plot_locations(arguments["<filename1>"], color_cutoff, md)
+
+    if arguments["disease"]:
+        if arguments["--runcnt"]:
+            runcnt=int(arguments["--runcnt"])
+            logger.info("Using runcnt={0}".format(runcnt))
+        else:
+            runcnt=float("inf")
+        plot_disease([arguments["<filename1>"], arguments["<filename2>"]],
+                runcnt, md)

@@ -132,7 +132,7 @@ def read_naadsm_pdf(pdf_owner, ns):
         if child.tag=="gamma":
             alpha=float(child.find("alpha", ns).text)
             beta=float(child.find("beta", ns).text)
-            dist=(stage_name, gspn.GammaDistribution, alpha, beta)
+            dist=(stage_name, gspn.GammaDistribution, alpha, 1/beta)
         elif child.tag=="point":
             days=int(child.text)
             if days>0:
