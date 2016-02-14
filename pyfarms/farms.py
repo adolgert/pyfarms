@@ -810,7 +810,7 @@ class InfectNeighborModel(object):
 
 class IndirectTransition(object):
     def __init__(self, landscape, farm_models,
-            source_farm, source_idx, rate, dist_pdf):
+            source_farm, source_idx, rate, dist_pdf, contact):
         self.farm=[source_farm]
         self.source_idx=source_idx
         self.rate=rate
@@ -828,6 +828,7 @@ class IndirectTransition(object):
             self.infectable.append(target.infection_partial())
             self.receiving.append(target.receive_shipments())
         self.affected_idx=source_idx
+        self.contact=contact
 
     def __str__(self):
         return "Indirect({0}-{1} {2})".format(self.farm[0].name,
@@ -856,7 +857,10 @@ class IndirectTransition(object):
         current_distances=list()
         for tidx in range(len(self.infectable)):
             uninfected=self.infectable[tidx].enabled(now)
-            receiving=self.receiving[tidx].intensity(now)
+            if self.contact=="direct":
+                receiving=self.receiving[tidx].intensity(now)
+            else:
+                receiving=True
             if uninfected and receiving:
                 self.current_recipients.append(tidx)
                 current_distances.append(
@@ -949,7 +953,7 @@ class IndirectModel(object):
     def write_transitions(self, writer):
         rate=self.movement_rate*self.probability_infect
         t=IndirectTransition(self.landscape, self.farm_models, self.source_farm,
-                self.source_idx, rate, self.distance_pdf)
+                self.source_idx, rate, self.distance_pdf, self.contact_type)
         writer.add_transition(t)
 
     def __str__(self):
