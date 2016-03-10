@@ -151,18 +151,35 @@ def save_h5(openh5, events):
 def plot_histogram(x, y, ab, name):
     fig=plt.figure(1, figsize=(8,5))
     ax=fig.add_subplot(111)
-    ax.plot(x, y/np.sum(y), 'o')
+    ycnt=np.sum(y)
+    ax.plot(x, (ycnt-np.cumsum(y))/ycnt, 'o')
     xx=np.linspace(0, x[-1], num=100)
-    yy=scipy.stats.gamma.pdf(xx, a=ab[0], scale=ab[1])
+    yy=scipy.stats.gamma.sf(xx, a=ab[0], scale=ab[1])
     print(xx)
     print(yy)
     ax.plot(xx, yy, lw=1, color="black")
     ax.set_xlabel("Time [days]")
-    ax.set_ylabel("Event Count")
+    ax.set_ylabel("Survival Fraction")
     ax.set_title(name)
     plt.savefig("{0}.pdf".format(name.split()[0]), format="pdf")
     plt.clf()
 
+
+def plot_hazard(x, y, ab, name):
+    fig=plt.figure(1, figsize=(8,5))
+    ax=fig.add_subplot(111)
+    ycnt=np.sum(y)
+    ax.plot(x, y/ycnt, 'o')
+    xx=np.linspace(0, x[-1], num=100)
+    yy=-scipy.stats.gamma.logsf(xx, a=ab[0], scale=ab[1])
+    print(xx)
+    print(yy)
+    ax.plot(xx, yy, lw=1, color="black")
+    ax.set_xlabel("Time [days]")
+    ax.set_ylabel("Survival Fraction")
+    ax.set_title(name)
+    plt.savefig("{0}.pdf".format(name.split()[0]), format="pdf")
+    plt.clf()
 
 def single_disease_stats(filename):
     cache_file="single_disease_stats.pickle"
@@ -183,8 +200,8 @@ def single_disease_stats(filename):
     else:
         logger.info("Loading times from {0}".format(cache_file))
         times=pickle.load(open(cache_file, "rb"))
-    names={1 : "Latent Period Transition Times",
-            3 : "Clinical Period Transition Times"}
+    names={1 : "Latent Period Transition Survival",
+            3 : "Clinical Period Transition Survival"}
     params={1 : (1.34, 0.18), 3 : (13.36, 1.57)}
     #params={1 : (1.34, 0.18), 3 : (1.34, 0.18)}
     for times_idx in [1, 3]:
@@ -206,7 +223,11 @@ def single_disease_stats(filename):
         cdf_to_25=scipy.stats.gamma.cdf(2.5, a=a, scale=th)
         logger.info("Gamma {0}".format((cdf_to_5, cdf_to_15-cdf_to_5,
             cdf_to_25-cdf_to_15)))
-        plot_histogram(x, y, params[times_idx], names[times_idx])
+        toplot="hazard"
+        if toplot=="survival":
+            plot_histogram(x, y, params[times_idx], names[times_idx])
+        elif toplot=="hazard":
+            plot_hazard(x, y, params[times_idx], names[times_idx])
 
 
 if __name__ == "__main__":

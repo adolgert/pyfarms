@@ -28,6 +28,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('pdf')
 import matplotlib.pyplot as plt
+from matplotlib.patches import Circle
 import h5py
 import yaml
 from docopt import docopt
@@ -246,7 +247,14 @@ def plot_locations(filename, color_cutoff, md):
     ax.set_title("Cause of Infection")
     locations=landscape.farm_locations
     names=[f.name for f in landscape.premises]
+    prods=[f.production_type for f in landscape.premises]
+    prod_colors={"backyard" : "r", "broilers" : "b",
+        "layers" : "g", "turkeys" : "c"}
     logger.info("Unit sizes {0}".format([f.size for f in landscape.premises]))
+    for idx in range(len(names)):
+        x0, y0=locations[idx]
+        plt.plot((y0,), (x0,), prod_colors[prods[idx]]+"o")
+
     idxof={int(n) : i for (i, n) in enumerate(names)}
     totals=list()
     for (i, j) in itertools.combinations(range(1, len(locations)+1), 2):
@@ -266,22 +274,25 @@ def plot_locations(filename, color_cutoff, md):
         dy=y0-y1
         if math.sqrt(dx*dx+dy*dy)<color_cutoff:
             plt.plot([y0, y1], [x0, x1],
-                color=plt.cm.gray(1-t/maximum))
+                color=plt.cm.gray((1-t/maximum)**3),
+                alpha=t/maximum, linewidth=3)
         else:
             if t>0:
                 plt.plot([y0, y1], [x0, x1],
-                    color=plt.cm.autumn(1-t/maximum))
+                    color=plt.cm.autumn(1-t/maximum), alpha=t/maximum,
+                    linewidth=3)
+    ax.legend([Circle((0,0), radius=3, color="r"),
+               Circle((0,0), radius=3, color="b"),
+               Circle((0,0), radius=3, color="g"),
+               Circle((0,0), radius=3, color="c")],
+               ["backyard", "broilers", "layers", "turkeys"],
+               loc="upper left")
     SaveFig("connectivity.pdf", md)
     plt.clf()
 
     fig=plt.figure(1)
     ax=fig.add_subplot(111)
     ax.set_title("Farm Locations by Name")
-    locations=landscape.farm_locations
-    names=[f.name for f in landscape.premises]
-    prods=[f.production_type for f in landscape.premises]
-    prod_colors={"backyard" : "r", "broilers" : "b",
-        "layers" : "g", "turkeys" : "c"}
     idxof={int(n) : i for (i, n) in enumerate(names)}
     for idx in range(len(names)):
         x0, y0=locations[idx]
